@@ -1,1 +1,1 @@
-gunicorn --chdir /app run:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+web: gunicorn run:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120

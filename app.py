@@ -11,7 +11,7 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
-database_url = os.getenv('DATABASE_URL', 'postgresql://postgres:NRxQKkDqxjjyUaIShsCTEgmMRqDuJEMY@turntable.proxy.rlwy.net:27386/railway')
+database_url = os.getenv('DATABASE_URL')
 if database_url and database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
 
