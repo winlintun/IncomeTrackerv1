@@ -1,0 +1,11 @@
+{
+  "name": "income-tracker-flask",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "python3 app.py",
+    "start": "gunicorn app:app --bind 0.0.0.0:${PORT:-3000}",
+    "build": "echo 'No build step needed for Python'",
+    "lint": "python3 -m py_compile app.py models.py"
+  }
+}

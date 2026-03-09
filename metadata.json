@@ -1,0 +1,5 @@
+{
+  "name": "Income Tracker (Flask)",
+  "description": "A lightweight, mobile-first web application built with Flask that lets users track daily earnings across multiple jobs, set monthly income targets, and visualize progress.",
+  "requestFramePermissions": []
+}
