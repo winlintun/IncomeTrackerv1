@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notes — Income Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --bg2: #161616;
+    --bg3: #1e1e1e;
+    --bg4: #252525;
+    --border: #2e2e2e;
+    --border2: #3a3a3a;
+    --text: #f0ede8;
+    --text2: #9e9a94;
+    --text3: #5c5856;
+    --accent: #d4a853;
+    --accent2: #e8c278;
+    --accent-bg: rgba(212,168,83,0.08);
+    --accent-border: rgba(212,168,83,0.25);
+    --pin: #d4a853;
+    --danger: #c9554a;
+    --danger-bg: rgba(201,85,74,0.08);
+    --success: #5c9e6e;
+    --radius: 10px;
+    --radius-lg: 14px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Instrument Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Top navbar */
+  .app-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: #111111;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .app-nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+  .app-nav-logo {
+    width: 32px;
+    height: 32px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .app-nav-logo svg { display: block; }
+  .app-nav-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.2px;
+  }
+  .app-nav-links {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 4px;
+    flex-wrap: wrap;
+  }
+  .app-nav-link {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text3);
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+  .app-nav-link:hover { background: var(--bg3); color: var(--text2); }
+  .app-nav-link.notes-active {
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-border);
+    color: var(--accent);
+  }
+
+  /* notes area below nav */
+  .notes-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 300px;
+    min-width: 300px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .sidebar-header {
+    padding: 24px 20px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 22px;
+    color: var(--text);
+    letter-spacing: -0.3px;
+    margin-bottom: 16px;
+  }
+
+  .search-wrap {
+    position: relative;
+  }
+
+  .search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text3);
+    font-size: 13px;
+    pointer-events: none;
+  }
+
+  #search {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 10px 8px 32px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  #search::placeholder { color: var(--text3); }
+  #search:focus { border-color: var(--border2); }
+
+  .new-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: calc(100% - 40px);
+    margin: 12px 20px 0;
+    padding: 9px 14px;
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-border);
+    border-radius: var(--radius);
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.01em;
+  }
+
+  .new-btn:hover { background: rgba(212,168,83,0.14); border-color: rgba(212,168,83,0.4); }
+
+  .new-btn-icon {
+    width: 16px;
+    height: 16px;
+    background: var(--accent);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #0f0f0f;
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .notes-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+
+  .notes-list::-webkit-scrollbar { width: 4px; }
+  .notes-list::-webkit-scrollbar-track { background: transparent; }
+  .notes-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .section-label {
+    padding: 10px 20px 4px;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text3);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .note-item {
+    padding: 10px 20px;
+    cursor: pointer;
+    border-radius: 0;
+    transition: background 0.1s;
+    border-left: 2px solid transparent;
+    position: relative;
+  }
+
+  .note-item:hover { background: var(--bg3); }
+
+  .note-item.active {
+    background: var(--bg3);
+    border-left-color: var(--accent);
+  }
+
+  .note-item-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .pin-icon {
+    color: var(--pin);
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+
+  .note-item-meta {
+    font-size: 11px;
+    color: var(--text3);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .note-item-preview {
+    font-size: 12px;
+    color: var(--text2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+
+  .empty-list {
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--text3);
+    font-size: 13px;
+  }
+
+  /* Editor */
+  .editor-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .editor-toolbar {
+    padding: 16px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .editor-toolbar .spacer { flex: 1; }
+
+  .toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text2);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .toolbar-btn:hover { background: var(--bg3); color: var(--text); border-color: var(--border2); }
+
+  .toolbar-btn.pin-active { color: var(--accent); border-color: var(--accent-border); background: var(--accent-bg); }
+
+  .toolbar-btn.danger:hover { color: var(--danger); border-color: rgba(201,85,74,0.3); background: var(--danger-bg); }
+
+  .toolbar-btn svg { width: 13px; height: 13px; }
+
+  .save-indicator {
+    font-size: 11px;
+    color: var(--text3);
+    font-family: 'DM Mono', monospace;
+  }
+
+  .save-indicator.saved { color: var(--success); }
+
+  .editor-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .editor-content::-webkit-scrollbar { width: 4px; }
+  .editor-content::-webkit-scrollbar-track { background: transparent; }
+  .editor-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  #note-title-input {
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: 'DM Serif Display', serif;
+    font-size: 32px;
+    color: var(--text);
+    width: 100%;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+    caret-color: var(--accent);
+    resize: none;
+    line-height: 1.25;
+  }
+
+  #note-title-input::placeholder { color: var(--text3); }
+
+  .note-date-line {
+    font-size: 12px;
+    color: var(--text3);
+    font-family: 'DM Mono', monospace;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  #note-body-input {
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: 'Instrument Sans', sans-serif;
+    font-size: 15px;
+    color: var(--text2);
+    width: 100%;
+    flex: 1;
+    resize: none;
+    line-height: 1.75;
+    caret-color: var(--accent);
+    min-height: 400px;
+  }
+
+  #note-body-input::placeholder { color: var(--text3); }
+
+  /* Empty state */
+  .empty-editor {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--text3);
+  }
+
+  .empty-editor-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .empty-editor h3 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 20px;
+    color: var(--text2);
+    font-weight: 400;
+  }
+
+  .empty-editor p {
+    font-size: 13px;
+    text-align: center;
+    max-width: 240px;
+    line-height: 1.6;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--bg4);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    font-size: 13px;
+    color: var(--text);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: all 0.2s;
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    width: 360px;
+    max-width: 90vw;
+  }
+
+  .modal h3 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 18px;
+    margin-bottom: 8px;
+    font-weight: 400;
+  }
+
+  .modal p { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 20px; }
+
+  .modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+
+  .btn {
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text2);
+    transition: all 0.15s;
+  }
+
+  .btn:hover { background: var(--bg3); color: var(--text); }
+
+  .btn.danger {
+    background: var(--danger-bg);
+    border-color: rgba(201,85,74,0.3);
+    color: var(--danger);
+  }
+
+  .btn.danger:hover { background: rgba(201,85,74,0.15); }
+
+  @media (max-width: 640px) {
+    .sidebar { width: 260px; min-width: 260px; }
+    .editor-content { padding: 20px 16px; }
+    .editor-toolbar { padding: 12px 16px; }
+    #note-title-input { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="app-nav">
+  <a class="app-nav-brand" href="/">
+    <div class="app-nav-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#0f0f0f" stroke-width="2.5" width="17" height="17">
+        <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
+        <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
+        <path d="M18 12a2 2 0 0 0 0 4h4v-4z"/>
+      </svg>
+    </div>
+    <span class="app-nav-title">IncomeTracker</span>
+  </a>
+
+  <div class="app-nav-links">
+    <a class="app-nav-link" href="/?view=dashboard">Dashboard</a>
+    <a class="app-nav-link" href="/?view=jobs">Jobs</a>
+    <a class="app-nav-link" href="/?view=income">Tracking</a>
+    <a class="app-nav-link" href="/?view=targets">Targets</a>
+    <a class="app-nav-link" href="/?view=summary">Summary</a>
+    <a class="app-nav-link" href="/?view=admin">Admin</a>
+    <a class="app-nav-link notes-active" href="/notes">Notes</a>
+  </div>
+</nav>
+
+<div class="notes-body">
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-title">Notes</div>
+    <div class="search-wrap">
+      <span class="search-icon">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="13" height="13">
+          <circle cx="7" cy="7" r="5"/><line x1="11" y1="11" x2="14" y2="14"/>
+        </svg>
+      </span>
+      <input id="search" type="text" placeholder="Search notes…" oninput="filterNotes(this.value)">
+    </div>
+  </div>
+  <button class="new-btn" onclick="createNote()">
+    <span class="new-btn-icon">+</span>
+    New note
+  </button>
+  <div class="notes-list" id="notes-list">
+    <div class="empty-list">No notes yet</div>
+  </div>
+</aside>
+
+<!-- Editor pane -->
+<main class="editor-pane" id="editor-pane">
+  <div class="empty-editor" id="empty-editor">
+    <div class="empty-editor-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
+        <line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/>
+      </svg>
+    </div>
+    <h3>Select a note</h3>
+    <p>Choose a note from the sidebar or create a new one to start writing.</p>
+  </div>
+
+  <div id="editor-active" style="display:none; flex-direction:column; height:100%;">
+    <div class="editor-toolbar">
+      <span class="save-indicator" id="save-indicator">—</span>
+      <div class="spacer"></div>
+      <button class="toolbar-btn" id="pin-btn" onclick="togglePin()" title="Pin note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+        </svg>
+        Pin
+      </button>
+      <button class="toolbar-btn danger" onclick="confirmDelete()" title="Delete note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+        </svg>
+        Delete
+      </button>
+    </div>
+    <div class="editor-content">
+      <textarea id="note-title-input" rows="1" placeholder="Note title…" oninput="autoResize(this); scheduleSave()"></textarea>
+      <div class="note-date-line" id="note-date-line"></div>
+      <textarea id="note-body-input" placeholder="Start writing…" oninput="scheduleSave()"></textarea>
+    </div>
+  </div>
+</main>
+
+</div><!-- /.notes-body -->
+
+<!-- Delete confirm modal -->
+<div class="modal-overlay" id="delete-modal">
+  <div class="modal">
+    <h3>Delete this note?</h3>
+    <p>This action cannot be undone. The note will be permanently removed.</p>
+    <div class="modal-btns">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn danger" onclick="deleteNote()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/api/notes';
+let notes = [];
+let activeNote = null;
+let saveTimer = null;
+let searchQuery = '';
+
+async function fetchNotes() {
+  try {
+    const res = await fetch(API, { credentials: 'include' });
+    if (res.status === 401) { window.location = '/'; return; }
+    notes = await res.json();
+    renderList(notes);
+  } catch(e) { showToast('Failed to load notes'); }
+}
+
+function formatDate(isoStr) {
+  const d = new Date(isoStr);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    + '  ·  '
+    + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatShort(isoStr) {
+  const d = new Date(isoStr);
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function renderList(list) {
+  const el = document.getElementById('notes-list');
+  if (!list.length) { el.innerHTML = '<div class="empty-list">No notes found</div>'; return; }
+
+  const pinned = list.filter(n => n.pinned);
+  const unpinned = list.filter(n => !n.pinned);
+  let html = '';
+
+  if (pinned.length) {
+    html += '<div class="section-label">Pinned</div>';
+    html += pinned.map(n => noteItemHTML(n)).join('');
+  }
+  if (unpinned.length) {
+    if (pinned.length) html += '<div class="section-label">All notes</div>';
+    html += unpinned.map(n => noteItemHTML(n)).join('');
+  }
+
+  el.innerHTML = html;
+}
+
+function noteItemHTML(n) {
+  const active = activeNote && activeNote.id === n.id ? ' active' : '';
+  const pinIcon = n.pinned ? '<span class="pin-icon">★</span>' : '';
+  const preview = n.content ? n.content.replace(/\n/g, ' ').slice(0, 60) + (n.content.length > 60 ? '…' : '') : '—';
+  return `<div class="note-item${active}" onclick="openNote(${n.id})">
+    <div class="note-item-title">${pinIcon}${escHtml(n.title || 'Untitled')}</div>
+    <div class="note-item-preview">${escHtml(preview)}</div>
+    <div class="note-item-meta">
+      <span>${formatShort(n.updated_at)}</span>
+    </div>
+  </div>`;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function openNote(id) {
+  if (saveTimer) { clearTimeout(saveTimer); saveNow(); }
+  activeNote = notes.find(n => n.id === id);
+  if (!activeNote) return;
+
+  document.getElementById('empty-editor').style.display = 'none';
+  const ae = document.getElementById('editor-active');
+  ae.style.display = 'flex';
+
+  const titleEl = document.getElementById('note-title-input');
+  titleEl.value = activeNote.title;
+  autoResize(titleEl);
+
+  document.getElementById('note-body-input').value = activeNote.content;
+  document.getElementById('note-date-line').textContent = 'Last edited ' + formatDate(activeNote.updated_at);
+  setSaveIndicator('saved');
+  updatePinBtn();
+  renderList(getFilteredNotes());
+}
+
+function updatePinBtn() {
+  const btn = document.getElementById('pin-btn');
+  if (activeNote && activeNote.pinned) {
+    btn.classList.add('pin-active');
+    btn.querySelector('svg').style.fill = 'currentColor';
+  } else {
+    btn.classList.remove('pin-active');
+    btn.querySelector('svg').style.fill = 'none';
+  }
+}
+
+async function createNote() {
+  try {
+    const res = await fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ title: 'New note', content: '' })
+    });
+    const note = await res.json();
+    notes.unshift(note);
+    renderList(getFilteredNotes());
+    openNote(note.id);
+    document.getElementById('note-title-input').focus();
+    document.getElementById('note-title-input').select();
+  } catch(e) { showToast('Could not create note'); }
+}
+
+function scheduleSave() {
+  setSaveIndicator('saving');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, 900);
+}
+
+async function saveNow() {
+  if (!activeNote) return;
+  const title = document.getElementById('note-title-input').value.trim() || 'Untitled';
+  const content = document.getElementById('note-body-input').value;
+  try {
+    const res = await fetch(`${API}/${activeNote.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ title, content })
+    });
+    const updated = await res.json();
+    activeNote.title = updated.title;
+    activeNote.content = updated.content;
+    activeNote.updated_at = updated.updated_at;
+    setSaveIndicator('saved');
+    document.getElementById('note-date-line').textContent = 'Last edited ' + formatDate(updated.updated_at);
+    const idx = notes.findIndex(n => n.id === activeNote.id);
+    if (idx !== -1) notes[idx] = activeNote;
+    renderList(getFilteredNotes());
+  } catch(e) { setSaveIndicator('error'); }
+}
+
+async function togglePin() {
+  if (!activeNote) return;
+  const newPinned = !activeNote.pinned;
+  try {
+    const res = await fetch(`${API}/${activeNote.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ pinned: newPinned })
+    });
+    const updated = await res.json();
+    activeNote.pinned = updated.pinned;
+    const idx = notes.findIndex(n => n.id === activeNote.id);
+    if (idx !== -1) notes[idx] = activeNote;
+    updatePinBtn();
+    renderList(getFilteredNotes());
+    showToast(newPinned ? 'Note pinned' : 'Note unpinned');
+  } catch(e) { showToast('Could not update note'); }
+}
+
+function confirmDelete() { document.getElementById('delete-modal').classList.add('open'); }
+function closeModal() { document.getElementById('delete-modal').classList.remove('open'); }
+
+async function deleteNote() {
+  closeModal();
+  if (!activeNote) return;
+  const id = activeNote.id;
+  try {
+    await fetch(`${API}/${id}`, { method: 'DELETE', credentials: 'include' });
+    notes = notes.filter(n => n.id !== id);
+    activeNote = null;
+    document.getElementById('editor-active').style.display = 'none';
+    document.getElementById('empty-editor').style.display = 'flex';
+    renderList(getFilteredNotes());
+    showToast('Note deleted');
+  } catch(e) { showToast('Could not delete note'); }
+}
+
+function filterNotes(q) {
+  searchQuery = q.toLowerCase();
+  renderList(getFilteredNotes());
+}
+
+function getFilteredNotes() {
+  if (!searchQuery) return notes;
+  return notes.filter(n =>
+    n.title.toLowerCase().includes(searchQuery) ||
+    n.content.toLowerCase().includes(searchQuery)
+  );
+}
+
+function setSaveIndicator(state) {
+  const el = document.getElementById('save-indicator');
+  el.className = 'save-indicator';
+  if (state === 'saved') { el.textContent = 'Saved'; el.classList.add('saved'); }
+  else if (state === 'saving') { el.textContent = 'Saving…'; }
+  else if (state === 'error') { el.textContent = 'Save failed'; el.style.color = 'var(--danger)'; }
+  else { el.textContent = '—'; }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+window.addEventListener('beforeunload', () => {
+  if (saveTimer) saveNow();
+});
+
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); createNote(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (saveTimer) { clearTimeout(saveTimer); saveNow(); } }
+});
+
+fetchNotes();
+</script>
+</body>
+</html>
