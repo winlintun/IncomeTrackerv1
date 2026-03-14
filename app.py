@@ -43,6 +43,13 @@ def init_db_with_retry(app, retries=5, delay=3):
         try:
             with app.app_context():
                 db.create_all()
+                # Add work_days_per_week column if it does not exist (existing DBs)
+                try:
+                    db.session.execute(text("ALTER TABLE target ADD COLUMN work_days_per_week FLOAT"))
+                    db.session.commit()
+                    print("Added work_days_per_week column.")
+                except Exception:
+                    db.session.rollback()  # column already exists, that is fine
                 db.session.execute(text('SELECT 1'))
                 print("Database connected.")
                 return
@@ -236,23 +243,38 @@ def manage_targets():
     if request.method == 'POST':
         data = request.json
         target = Target.query.filter_by(user_id=current_user.id, month=data['month']).first()
+        work_days = data.get('work_days_per_week')
+        if work_days is not None:
+            try:
+                work_days = float(work_days)
+            except (ValueError, TypeError):
+                work_days = None
         if target:
             target.amount = data['amount']
+            if work_days is not None:
+                target.work_days_per_week = work_days
         else:
-            target = Target(user_id=current_user.id, month=data['month'], amount=data['amount'])
+            target = Target(
+                user_id=current_user.id,
+                month=data['month'],
+                amount=data['amount'],
+                work_days_per_week=work_days
+            )
             db.session.add(target)
         db.session.commit()
         return jsonify({
             'id': target.id,
             'month': target.month,
-            'amount': target.amount
+            'amount': target.amount,
+            'work_days_per_week': target.work_days_per_week
         })
     
     targets = Target.query.filter_by(user_id=current_user.id).all()
     return jsonify([{
         'id': t.id,
         'month': t.month,
-        'amount': t.amount
+        'amount': t.amount,
+        'work_days_per_week': t.work_days_per_week
     } for t in targets])
 
 # --- Admin Routes ---
@@ -405,7 +427,6 @@ def manage_note_item(note_id):
     db.session.delete(note)
     db.session.commit()
     return jsonify({'message': 'Note deleted'})
-
 
 # --- Expense Routes ---
 
