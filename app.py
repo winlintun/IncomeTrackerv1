@@ -16,7 +16,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
 from dotenv import load_dotenv
-from models import db, User, Job, IncomeRecord, Target, Note
+from models import db, User, Job, IncomeRecord, Target, Note, Expense
 from datetime import datetime, timedelta
 from sqlalchemy import text
 import time
@@ -406,6 +406,116 @@ def manage_note_item(note_id):
     db.session.commit()
     return jsonify({'message': 'Note deleted'})
 
+
+# --- Expense Routes ---
+
+@app.route('/api/expenses', methods=['GET', 'POST'])
+@login_required
+def manage_expenses():
+    if request.method == 'POST':
+        data = request.json
+        try:
+            amount = float(data.get('amount', 0))
+        except ValueError:
+            return jsonify({'error': 'Invalid amount'}), 400
+
+        tags_raw = data.get('tags', [])
+        tags_str = ','.join([t.strip() for t in tags_raw if t.strip()]) if isinstance(tags_raw, list) else data.get('tags', '')
+
+        expense = Expense(
+            user_id=current_user.id,
+            date=data['date'],
+            amount=amount,
+            description=data.get('description', ''),
+            tags=tags_str,
+            expense_type=data.get('expense_type', 'daily')
+        )
+        db.session.add(expense)
+        db.session.commit()
+        return jsonify({
+            'id': expense.id,
+            'date': expense.date,
+            'amount': expense.amount,
+            'description': expense.description,
+            'tags': expense.tags.split(',') if expense.tags else [],
+            'expense_type': expense.expense_type,
+            'created_at': expense.created_at.isoformat()
+        }), 201
+
+    expenses = Expense.query.filter_by(user_id=current_user.id).order_by(Expense.date.desc()).all()
+    return jsonify([{
+        'id': e.id,
+        'date': e.date,
+        'amount': e.amount,
+        'description': e.description,
+        'tags': e.tags.split(',') if e.tags else [],
+        'expense_type': e.expense_type,
+        'created_at': e.created_at.isoformat()
+    } for e in expenses])
+
+
+@app.route('/api/expenses/<int:expense_id>', methods=['PUT', 'DELETE'])
+@login_required
+def manage_expense_item(expense_id):
+    expense = Expense.query.filter_by(id=expense_id, user_id=current_user.id).first_or_404()
+
+    if request.method == 'PUT':
+        data = request.json
+        if 'amount' in data:
+            try:
+                expense.amount = float(data['amount'])
+            except ValueError:
+                return jsonify({'error': 'Invalid amount'}), 400
+        if 'description' in data:
+            expense.description = data['description']
+        if 'date' in data:
+            expense.date = data['date']
+        if 'tags' in data:
+            tags_raw = data['tags']
+            expense.tags = ','.join([t.strip() for t in tags_raw if t.strip()]) if isinstance(tags_raw, list) else tags_raw
+        if 'expense_type' in data:
+            expense.expense_type = data['expense_type']
+        db.session.commit()
+        return jsonify({
+            'id': expense.id,
+            'date': expense.date,
+            'amount': expense.amount,
+            'description': expense.description,
+            'tags': expense.tags.split(',') if expense.tags else [],
+            'expense_type': expense.expense_type
+        })
+
+    db.session.delete(expense)
+    db.session.commit()
+    return jsonify({'message': 'Expense deleted'})
+
+
+@app.route('/api/expenses/stats')
+@login_required
+def expense_stats():
+    from sqlalchemy import func
+    expenses = Expense.query.filter_by(user_id=current_user.id).all()
+    current_month = datetime.utcnow().strftime('%Y-%m')
+
+    monthly = [e for e in expenses if e.date.startswith(current_month)]
+    monthly_total = sum(e.amount for e in monthly)
+
+    by_type = {}
+    for e in monthly:
+        by_type[e.expense_type] = by_type.get(e.expense_type, 0) + e.amount
+
+    all_tags = {}
+    for e in monthly:
+        for tag in (e.tags.split(',') if e.tags else []):
+            tag = tag.strip()
+            if tag:
+                all_tags[tag] = all_tags.get(tag, 0) + e.amount
+
+    return jsonify({
+        'monthly_total': monthly_total,
+        'by_type': by_type,
+        'by_tag': all_tags
+    })
 
 
 @app.route('/')
