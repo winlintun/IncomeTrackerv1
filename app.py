@@ -1,11 +1,25 @@
+# /// script
+# requires-python = ">=3.13"
+# dependencies = [
+#     "flask==3.0.0",
+#     "flask-bcrypt==1.0.1",
+#     "flask-login==0.6.3",
+#     "flask-sqlalchemy==3.1.1",
+#     "gunicorn==21.2.0",
+#     "psycopg2-binary==2.9.11",
+#     "python-dotenv==1.0.0",
+# ]
+# ///
 import os
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
 from dotenv import load_dotenv
-from models import db, User, Job, IncomeRecord, Target
+from models import db, User, Job, IncomeRecord, Target, Note
 from datetime import datetime, timedelta
+from sqlalchemy import text
+import time
 
 load_dotenv()
 
@@ -23,8 +37,23 @@ bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-with app.app_context():
-    db.create_all()
+
+def init_db_with_retry(app, retries=5, delay=3):
+    for attempt in range(retries):
+        try:
+            with app.app_context():
+                db.create_all()
+                db.session.execute(text('SELECT 1'))
+                print("Database connected.")
+                return
+        except Exception as e:
+            print(f"DB not ready (attempt {attempt+1}/{retries}): {e}")
+            time.sleep(delay)
+    raise RuntimeError("Could not connect to the database after retries.")
+
+init_db_with_retry(app)
+# with app.app_context():
+#     db.create_all()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -296,7 +325,88 @@ def admin_stats():
         } for r in recent_records]
     })
 
-# --- Frontend Route ---
+
+# Personal Note Page Router
+@app.route('/notes')
+@login_required
+def notes_page():
+    return render_template('note.html')
+
+
+# --- Note Routes ---
+@app.route('/api/notes', methods=['GET', 'POST'])
+@login_required
+def manage_notes():
+    if request.method == 'POST':
+        data = request.json
+        note = Note(
+            user_id=current_user.id,
+            title=data.get('title', 'Untitled'),
+            content=data.get('content', ''),
+            pinned=data.get('pinned', False)
+        )
+        db.session.add(note)
+        db.session.commit()
+        return jsonify({
+            'id': note.id,
+            'title': note.title,
+            'content': note.content,
+            'pinned': note.pinned,
+            'created_at': note.created_at.isoformat(),
+            'updated_at': note.updated_at.isoformat()
+        }), 201
+ 
+    notes = Note.query.filter_by(user_id=current_user.id)\
+        .order_by(Note.pinned.desc(), Note.updated_at.desc()).all()
+    return jsonify([{
+        'id': n.id,
+        'title': n.title,
+        'content': n.content,
+        'pinned': n.pinned,
+        'created_at': n.created_at.isoformat(),
+        'updated_at': n.updated_at.isoformat()
+    } for n in notes])
+ 
+ 
+@app.route('/api/notes/<int:note_id>', methods=['GET', 'PUT', 'DELETE'])
+@login_required
+def manage_note_item(note_id):
+    note = Note.query.filter_by(id=note_id, user_id=current_user.id).first_or_404()
+ 
+    if request.method == 'GET':
+        return jsonify({
+            'id': note.id,
+            'title': note.title,
+            'content': note.content,
+            'pinned': note.pinned,
+            'created_at': note.created_at.isoformat(),
+            'updated_at': note.updated_at.isoformat()
+        })
+ 
+    if request.method == 'PUT':
+        data = request.json
+        if 'title' in data:
+            note.title = data['title']
+        if 'content' in data:
+            note.content = data['content']
+        if 'pinned' in data:
+            note.pinned = data['pinned']
+        note.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({
+            'id': note.id,
+            'title': note.title,
+            'content': note.content,
+            'pinned': note.pinned,
+            'created_at': note.created_at.isoformat(),
+            'updated_at': note.updated_at.isoformat()
+        })
+ 
+    db.session.delete(note)
+    db.session.commit()
+    return jsonify({'message': 'Note deleted'})
+
+
 
 @app.route('/')
 def index():

@@ -73,6 +73,11 @@
             state.user = await res.json();
             if (state.user) {
                 await fetchData();
+                const viewParam = new URLSearchParams(window.location.search).get('view');
+                if (viewParam) {
+                    state.currentView = viewParam;
+                    window.history.replaceState({}, '', '/');
+                }
             }
             state.loading = false;
             render();
@@ -271,6 +276,7 @@
                         <button onclick="window.setView('targets')" class="px-6 py-2 rounded-xl text-sm font-bold transition-all ${state.currentView === 'targets' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}">Targets</button>
                         <button onclick="window.setView('summary')" class="px-6 py-2 rounded-xl text-sm font-bold transition-all ${state.currentView === 'summary' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}">Summary</button>
                         ${state.user.role === 'admin' ? `<button onclick="window.setView('admin')" class="px-6 py-2 rounded-xl text-sm font-bold transition-all ${state.currentView === 'admin' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}">Admin</button>` : ''}
+                        <button onclick="window.setView('notes')" class="px-6 py-2 rounded-xl text-sm font-bold transition-all ${state.currentView === 'notes' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}">Notes</button>
                     </div>
 
                     <div class="flex items-center gap-2 md:gap-4">
@@ -313,6 +319,9 @@
                                         <i data-lucide="shield-check"></i> Admin
                                     </button>
                                 ` : ''}
+                                <button onclick="window.setView('notes')" class="flex items-center gap-4 p-4 rounded-2xl font-bold ${state.currentView === 'notes' ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:bg-zinc-50'}">
+                                    <i data-lucide="notebook-pen"></i> Notes
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -349,6 +358,7 @@
             else if (state.currentView === 'targets') renderTargets(container);
             else if (state.currentView === 'summary') renderSummary(container);
             else if (state.currentView === 'admin') renderAdmin(container);
+            else if (state.currentView === 'notes') renderNotes(container);
         }
 
         function renderDashboard(container) {
@@ -1273,6 +1283,318 @@
                 render();
             }
         };
+
+
+        // ── Notes state (scoped to avoid conflicts with other views) ──
+        let _notes = [];
+        let _activeNote = null;
+        let _saveTimer = null;
+        let _searchQuery = '';
+
+        function renderNotes(container) {
+            _notes = [];
+            _activeNote = null;
+            _saveTimer = null;
+            _searchQuery = '';
+
+            container.innerHTML = `
+                <style>
+                .notes-wrap { display:flex; gap:0; height:calc(100vh - 160px); min-height:500px; background:#fff; border-radius:2.5rem; overflow:hidden; border:1px solid rgba(0,0,0,0.05); box-shadow:0 4px 20px -2px rgba(0,0,0,0.05); }
+
+                .notes-sidebar { width:280px; min-width:280px; background:#f9f9f8; border-right:1px solid #e8e6e1; display:flex; flex-direction:column; }
+                .notes-sidebar-hd { padding:20px 16px 12px; border-bottom:1px solid #e8e6e1; }
+                .notes-sidebar-title { font-family:'DM Serif Display',serif; font-size:18px; color:#18181b; margin-bottom:12px; }
+                .notes-search-wrap { position:relative; }
+                .notes-search-icon { position:absolute; left:9px; top:50%; transform:translateY(-50%); color:#aaa; pointer-events:none; }
+                #n-search { width:100%; background:#fff; border:1px solid #e2e8f0; border-radius:10px; color:#18181b; font-family:inherit; font-size:13px; padding:7px 10px 7px 30px; outline:none; transition:border-color 0.15s; }
+                #n-search:focus { border-color:#18181b; }
+                .notes-new-btn { display:flex; align-items:center; gap:8px; width:calc(100% - 32px); margin:10px 16px 0; padding:8px 12px; background:rgba(212,168,83,0.08); border:1px solid rgba(212,168,83,0.25); border-radius:10px; color:#b8892a; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; transition:all 0.15s; }
+                .notes-new-btn:hover { background:rgba(212,168,83,0.15); }
+                .notes-new-icon { width:16px; height:16px; background:#d4a853; border-radius:4px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:15px; line-height:1; flex-shrink:0; }
+                .notes-list { flex:1; overflow-y:auto; padding:6px 0; }
+                .notes-list::-webkit-scrollbar { width:3px; }
+                .notes-list::-webkit-scrollbar-thumb { background:#d1cfc9; border-radius:2px; }
+                .n-section-label { padding:8px 16px 3px; font-size:10px; font-weight:600; color:#aaa; letter-spacing:0.1em; text-transform:uppercase; }
+                .n-item { padding:9px 16px; cursor:pointer; border-left:2px solid transparent; transition:background 0.1s; }
+                .n-item:hover { background:#f0ede8; }
+                .n-item.active { background:#f0ede8; border-left-color:#d4a853; }
+                .n-item-title { font-size:13px; font-weight:600; color:#18181b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; display:flex; align-items:center; gap:5px; }
+                .n-pin-icon { color:#d4a853; font-size:10px; flex-shrink:0; }
+                .n-item-preview { font-size:11px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+                .n-item-meta { font-size:10px; color:#bbb; margin-top:2px; }
+                .n-empty-list { padding:24px 16px; text-align:center; color:#bbb; font-size:13px; }
+
+                .notes-editor { flex:1; display:flex; flex-direction:column; min-width:0; }
+                .notes-empty-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:#ccc; }
+                .notes-empty-icon { width:44px; height:44px; border-radius:10px; background:#f4f4f5; border:1px solid #e2e8f0; display:flex; align-items:center; justify-content:center; }
+                .notes-toolbar { padding:14px 24px; border-bottom:1px solid #f0ede8; display:flex; align-items:center; gap:8px; flex-shrink:0; }
+                .notes-toolbar .spacer { flex:1; }
+                .n-save-ind { font-size:11px; color:#bbb; font-family:'JetBrains Mono',monospace; }
+                .n-save-ind.saved { color:#5c9e6e; }
+                .n-toolbar-btn { display:flex; align-items:center; gap:5px; padding:6px 11px; border-radius:8px; border:1px solid #e2e8f0; background:transparent; color:#888; font-family:inherit; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.15s; }
+                .n-toolbar-btn:hover { background:#f4f4f5; color:#18181b; border-color:#d1d5db; }
+                .n-toolbar-btn.pin-active { color:#d4a853; border-color:rgba(212,168,83,0.4); background:rgba(212,168,83,0.08); }
+                .n-toolbar-btn.danger:hover { color:#c9554a; border-color:rgba(201,85,74,0.3); background:rgba(201,85,74,0.06); }
+                .notes-content { flex:1; overflow-y:auto; padding:28px 32px; display:flex; flex-direction:column; }
+                .notes-content::-webkit-scrollbar { width:3px; }
+                .notes-content::-webkit-scrollbar-thumb { background:#e2e8f0; border-radius:2px; }
+                #n-title-input { background:transparent; border:none; outline:none; font-family:'DM Serif Display',serif; font-size:28px; color:#18181b; width:100%; letter-spacing:-0.3px; margin-bottom:4px; caret-color:#d4a853; resize:none; line-height:1.3; }
+                #n-title-input::placeholder { color:#ddd; }
+                .n-date-line { font-size:11px; color:#bbb; font-family:'JetBrains Mono',monospace; margin-bottom:20px; padding-bottom:14px; border-bottom:1px solid #f0ede8; }
+                #n-body-input { background:transparent; border:none; outline:none; font-family:inherit; font-size:14px; color:#555; width:100%; flex:1; resize:none; line-height:1.8; caret-color:#d4a853; min-height:320px; }
+                #n-body-input::placeholder { color:#ddd; }
+
+                .n-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200; align-items:center; justify-content:center; }
+                .n-modal-overlay.open { display:flex; }
+                .n-modal { background:#fff; border:1px solid #e2e8f0; border-radius:16px; padding:24px; width:340px; max-width:90vw; }
+                .n-modal h3 { font-family:'DM Serif Display',serif; font-size:17px; margin-bottom:6px; font-weight:400; }
+                .n-modal p { font-size:13px; color:#888; line-height:1.6; margin-bottom:18px; }
+                .n-modal-btns { display:flex; gap:8px; justify-content:flex-end; }
+                .n-btn { padding:7px 14px; border-radius:8px; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; border:1px solid #e2e8f0; background:transparent; color:#888; transition:all 0.15s; }
+                .n-btn:hover { background:#f4f4f5; color:#18181b; }
+                .n-btn.danger { background:rgba(201,85,74,0.06); border-color:rgba(201,85,74,0.25); color:#c9554a; }
+                .n-btn.danger:hover { background:rgba(201,85,74,0.12); }
+
+                .n-toast { position:fixed; bottom:24px; right:24px; background:#18181b; border-radius:10px; padding:9px 16px; font-size:13px; color:#fff; opacity:0; transform:translateY(8px); transition:all 0.2s; pointer-events:none; z-index:300; }
+                .n-toast.show { opacity:1; transform:translateY(0); }
+                </style>
+
+                <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+                <div class="notes-wrap">
+                    <aside class="notes-sidebar">
+                        <div class="notes-sidebar-hd">
+                            <div class="notes-sidebar-title">Notes</div>
+                            <div class="notes-search-wrap">
+                                <span class="notes-search-icon">
+                                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><circle cx="7" cy="7" r="5"/><line x1="11" y1="11" x2="14" y2="14"/></svg>
+                                </span>
+                                <input id="n-search" type="text" placeholder="Search notes…" oninput="window._nFilterNotes(this.value)">
+                            </div>
+                        </div>
+                        <button class="notes-new-btn" onclick="window._nCreateNote()">
+                            <span class="notes-new-icon">+</span>
+                            New note
+                        </button>
+                        <div class="notes-list" id="n-list"><div class="n-empty-list">No notes yet</div></div>
+                    </aside>
+
+                    <div class="notes-editor">
+                        <div class="notes-empty-state" id="n-empty">
+                            <div class="notes-empty-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1.5" width="20" height="20"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                            </div>
+                            <p style="font-size:14px;color:#ccc;">Select a note or create one</p>
+                        </div>
+                        <div id="n-editor-active" style="display:none;flex-direction:column;height:100%;">
+                            <div class="notes-toolbar">
+                                <span class="n-save-ind" id="n-save-ind">—</span>
+                                <div class="spacer"></div>
+                                <button class="n-toolbar-btn" id="n-pin-btn" onclick="window._nTogglePin()">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="13" height="13"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                                    Pin
+                                </button>
+                                <button class="n-toolbar-btn danger" onclick="window._nConfirmDelete()">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                                    Delete
+                                </button>
+                            </div>
+                            <div class="notes-content">
+                                <textarea id="n-title-input" rows="1" placeholder="Note title…" oninput="window._nAutoResize(this); window._nScheduleSave()"></textarea>
+                                <div class="n-date-line" id="n-date-line"></div>
+                                <textarea id="n-body-input" placeholder="Start writing…" oninput="window._nScheduleSave()"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="n-modal-overlay" id="n-del-modal">
+                    <div class="n-modal">
+                        <h3>Delete this note?</h3>
+                        <p>This action cannot be undone. The note will be permanently removed.</p>
+                        <div class="n-modal-btns">
+                            <button class="n-btn" onclick="window._nCloseModal()">Cancel</button>
+                            <button class="n-btn danger" onclick="window._nDeleteNote()">Delete</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="n-toast" id="n-toast"></div>
+            `;
+
+            // ── helpers ──
+            const API = '/api/notes';
+
+            function nFmtDate(s) {
+                const d = new Date(s);
+                return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + '  ·  ' + d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+            }
+            function nFmtShort(s) {
+                const d = new Date(s), now = new Date(), diff = now - d;
+                if (diff < 60000) return 'just now';
+                if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+                if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+                return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+            }
+            function escH(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+            function nRenderList(list) {
+                const el = document.getElementById('n-list');
+                if (!el) return;
+                if (!list.length) { el.innerHTML = '<div class="n-empty-list">No notes found</div>'; return; }
+                const pinned = list.filter(n => n.pinned), unpinned = list.filter(n => !n.pinned);
+                let html = '';
+                if (pinned.length) { html += '<div class="n-section-label">Pinned</div>'; html += pinned.map(nItemHTML).join(''); }
+                if (unpinned.length) { if (pinned.length) html += '<div class="n-section-label">All notes</div>'; html += unpinned.map(nItemHTML).join(''); }
+                el.innerHTML = html;
+            }
+            function nItemHTML(n) {
+                const active = _activeNote && _activeNote.id === n.id ? ' active' : '';
+                const pin = n.pinned ? '<span class="n-pin-icon">★</span>' : '';
+                const prev = n.content ? n.content.replace(/\n/g,' ').slice(0,55) + (n.content.length > 55 ? '…' : '') : '—';
+                return `<div class="n-item${active}" onclick="window._nOpenNote(${n.id})">
+                    <div class="n-item-title">${pin}${escH(n.title||'Untitled')}</div>
+                    <div class="n-item-preview">${escH(prev)}</div>
+                    <div class="n-item-meta">${nFmtShort(n.updated_at)}</div>
+                </div>`;
+            }
+            function nFilteredNotes() {
+                if (!_searchQuery) return _notes;
+                return _notes.filter(n => n.title.toLowerCase().includes(_searchQuery) || n.content.toLowerCase().includes(_searchQuery));
+            }
+            function nSetSave(state) {
+                const el = document.getElementById('n-save-ind');
+                if (!el) return;
+                el.className = 'n-save-ind';
+                if (state === 'saved') { el.textContent = 'Saved'; el.classList.add('saved'); }
+                else if (state === 'saving') { el.textContent = 'Saving…'; }
+                else if (state === 'error') { el.textContent = 'Save failed'; el.style.color = '#c9554a'; }
+                else { el.textContent = '—'; }
+            }
+            function nShowToast(msg) {
+                const t = document.getElementById('n-toast');
+                if (!t) return;
+                t.textContent = msg; t.classList.add('show');
+                setTimeout(() => t.classList.remove('show'), 2200);
+            }
+            function nUpdatePinBtn() {
+                const btn = document.getElementById('n-pin-btn');
+                if (!btn) return;
+                if (_activeNote && _activeNote.pinned) {
+                    btn.classList.add('pin-active');
+                    btn.querySelector('svg').style.fill = 'currentColor';
+                } else {
+                    btn.classList.remove('pin-active');
+                    btn.querySelector('svg').style.fill = 'none';
+                }
+            }
+
+            // ── global handlers (called from inline onclick) ──
+            window._nAutoResize = (el) => { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; };
+            window._nFilterNotes = (q) => { _searchQuery = q.toLowerCase(); nRenderList(nFilteredNotes()); };
+            window._nConfirmDelete = () => { const m = document.getElementById('n-del-modal'); if (m) m.classList.add('open'); };
+            window._nCloseModal = () => { const m = document.getElementById('n-del-modal'); if (m) m.classList.remove('open'); };
+
+            window._nScheduleSave = () => {
+                nSetSave('saving');
+                clearTimeout(_saveTimer);
+                _saveTimer = setTimeout(window._nSaveNow, 900);
+            };
+
+            window._nSaveNow = async () => {
+                if (!_activeNote) return;
+                const title = (document.getElementById('n-title-input')?.value || '').trim() || 'Untitled';
+                const content = document.getElementById('n-body-input')?.value || '';
+                try {
+                    const res = await fetch(`${API}/${_activeNote.id}`, {
+                        method: 'PUT', headers: {'Content-Type':'application/json'}, credentials: 'include',
+                        body: JSON.stringify({title, content})
+                    });
+                    const updated = await res.json();
+                    _activeNote.title = updated.title;
+                    _activeNote.content = updated.content;
+                    _activeNote.updated_at = updated.updated_at;
+                    nSetSave('saved');
+                    const dl = document.getElementById('n-date-line');
+                    if (dl) dl.textContent = 'Last edited ' + nFmtDate(updated.updated_at);
+                    const idx = _notes.findIndex(n => n.id === _activeNote.id);
+                    if (idx !== -1) _notes[idx] = _activeNote;
+                    nRenderList(nFilteredNotes());
+                } catch(e) { nSetSave('error'); }
+            };
+
+            window._nOpenNote = (id) => {
+                if (_saveTimer) { clearTimeout(_saveTimer); window._nSaveNow(); }
+                _activeNote = _notes.find(n => n.id === id);
+                if (!_activeNote) return;
+                document.getElementById('n-empty').style.display = 'none';
+                const ae = document.getElementById('n-editor-active');
+                ae.style.display = 'flex';
+                const titleEl = document.getElementById('n-title-input');
+                titleEl.value = _activeNote.title;
+                window._nAutoResize(titleEl);
+                document.getElementById('n-body-input').value = _activeNote.content;
+                document.getElementById('n-date-line').textContent = 'Last edited ' + nFmtDate(_activeNote.updated_at);
+                nSetSave('saved');
+                nUpdatePinBtn();
+                nRenderList(nFilteredNotes());
+            };
+
+            window._nCreateNote = async () => {
+                try {
+                    const res = await fetch(API, {
+                        method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include',
+                        body: JSON.stringify({title: 'New note', content: ''})
+                    });
+                    const note = await res.json();
+                    _notes.unshift(note);
+                    nRenderList(nFilteredNotes());
+                    window._nOpenNote(note.id);
+                    const t = document.getElementById('n-title-input');
+                    if (t) { t.focus(); t.select(); }
+                } catch(e) { nShowToast('Could not create note'); }
+            };
+
+            window._nTogglePin = async () => {
+                if (!_activeNote) return;
+                const newPinned = !_activeNote.pinned;
+                try {
+                    const res = await fetch(`${API}/${_activeNote.id}`, {
+                        method: 'PUT', headers: {'Content-Type':'application/json'}, credentials: 'include',
+                        body: JSON.stringify({pinned: newPinned})
+                    });
+                    const updated = await res.json();
+                    _activeNote.pinned = updated.pinned;
+                    const idx = _notes.findIndex(n => n.id === _activeNote.id);
+                    if (idx !== -1) _notes[idx] = _activeNote;
+                    nUpdatePinBtn();
+                    nRenderList(nFilteredNotes());
+                    nShowToast(newPinned ? 'Note pinned' : 'Note unpinned');
+                } catch(e) { nShowToast('Could not update note'); }
+            };
+
+            window._nDeleteNote = async () => {
+                window._nCloseModal();
+                if (!_activeNote) return;
+                const id = _activeNote.id;
+                try {
+                    await fetch(`${API}/${id}`, { method: 'DELETE', credentials: 'include' });
+                    _notes = _notes.filter(n => n.id !== id);
+                    _activeNote = null;
+                    const ae = document.getElementById('n-editor-active');
+                    if (ae) ae.style.display = 'none';
+                    const empty = document.getElementById('n-empty');
+                    if (empty) empty.style.display = 'flex';
+                    nRenderList(nFilteredNotes());
+                    nShowToast('Note deleted');
+                } catch(e) { nShowToast('Could not delete note'); }
+            };
+
+            // ── initial fetch ──
+            fetch(API, {credentials: 'include'})
+                .then(r => r.json())
+                .then(data => { _notes = data; nRenderList(_notes); })
+                .catch(() => nShowToast('Failed to load notes'));
+        }
 
         init();
     </script>
