@@ -12,6 +12,7 @@ class User(UserMixin, db.Model):
     jobs = db.relationship('Job', backref='owner', lazy=True, cascade="all, delete-orphan")
     income_records = db.relationship('IncomeRecord', backref='user', lazy=True, cascade="all, delete-orphan")
     targets = db.relationship('Target', backref='user', lazy=True, cascade="all, delete-orphan")
+    expenses = db.relationship('Expense', backref='user', lazy=True, cascade="all, delete-orphan")
 
 class Job(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -48,3 +49,13 @@ class Note(db.Model):
     pinned = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class Expense(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    date = db.Column(db.String(10), nullable=False)       # YYYY-MM-DD
+    amount = db.Column(db.Float, nullable=False)
+    description = db.Column(db.String(200), nullable=False)
+    tags = db.Column(db.String(500), default='')           # comma-separated tags
+    expense_type = db.Column(db.String(50), default='daily')  # daily / bills / work / one-time
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
