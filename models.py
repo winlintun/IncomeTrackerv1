@@ -38,6 +38,7 @@ class Target(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     month = db.Column(db.String(7), nullable=False)  # YYYY-MM
     amount = db.Column(db.Float, nullable=False)
+    work_days_per_week = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 

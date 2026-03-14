@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Income Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -730,6 +731,8 @@
                         </button>
                     </div>
 
+                    <div id="work-pace-panel" class="mb-0"></div>
+
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
                         <!-- Calendar View -->
                         <div class="lg:col-span-2 bg-white p-10 rounded-[2.5rem] border border-black/5 shadow-sm">
@@ -806,7 +809,160 @@
                 <div id="modal-container"></div>
             `;
             lucide.createIcons();
+            renderWorkPacePanel();
         }
+
+        function renderWorkPacePanel() {
+            var panel = document.getElementById('work-pace-panel');
+            if (!panel) return;
+
+            var now = new Date();
+            var currentMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            var dayOfMonth = now.getDate();
+            var totalDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+
+            // Find current month target
+            var target = null;
+            for (var i = 0; i < state.targets.length; i++) {
+                if (state.targets[i].month === currentMonth) { target = state.targets[i]; break; }
+            }
+            var targetAmt = target ? parseFloat(target.amount) : 0;
+            var wdpw = (target && target.work_days_per_week != null) ? parseFloat(target.work_days_per_week) : null;
+
+            // Sum income this month
+            var earned = 0;
+            for (var i = 0; i < state.income.length; i++) {
+                if (state.income[i].date.slice(0, 7) === currentMonth) earned += parseFloat(state.income[i].amount);
+            }
+
+            if (!targetAmt) { panel.innerHTML = ''; return; }
+
+            // Build 1-7 day selector pills
+            var pills = '';
+            for (var d = 1; d <= 7; d++) {
+                var sel = (wdpw === d);
+                pills += '<button type="button" onclick="window.saveWorkDays(' + d + ')" style="'
+                    + (sel ? 'background:#18181b;color:#fff;border-color:#18181b;' : 'background:#f9fafb;color:#a1a1aa;border-color:#f4f4f5;')
+                    + '" class="py-2 px-3 rounded-xl border text-xs font-bold transition-all hover:border-zinc-400 cursor-pointer">' + d + 'd</button>';
+            }
+
+            // Stats when days are set
+            var statsHTML = '';
+            if (wdpw !== null) {
+                var totalWorkDays = Math.round((wdpw / 7) * totalDays);
+                var doneWorkDays  = Math.max(0, Math.round((wdpw / 7) * (dayOfMonth - 1)));
+                var leftWorkDays  = Math.max(0, totalWorkDays - doneWorkDays);
+
+                // Estimated completion
+                var compLabel = '—';
+                var compNote  = 'Log income to get an estimate';
+                var compStyle = 'color:#18181b';
+                var noteStyle = 'color:#a1a1aa';
+
+                if (earned >= targetAmt) {
+                    compLabel = 'Done!';
+                    compNote  = 'Target already reached this month';
+                    compStyle = 'color:#10b981';
+                    noteStyle = 'color:#10b981';
+                } else if (doneWorkDays > 0) {
+                    var dailyRate = earned / doneWorkDays;
+                    if (dailyRate > 0) {
+                        var daysNeeded   = Math.ceil((targetAmt - earned) / dailyRate);
+                        var calNeeded    = Math.ceil(daysNeeded / (wdpw / 7));
+                        var estDate      = new Date(now);
+                        estDate.setDate(now.getDate() + calNeeded);
+                        var endOfMonth   = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                        var months       = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                        compLabel = months[estDate.getMonth()] + ' ' + estDate.getDate();
+                        if (estDate > endOfMonth) {
+                            compNote  = 'Behind pace \u2014 may miss this month';
+                            compStyle = 'color:#ef4444';
+                            noteStyle = 'color:#f87171';
+                        } else {
+                            compNote  = 'Estimated completion this month';
+                        }
+                    }
+                }
+
+                // Progress bar
+                var pct = Math.min(100, (earned / targetAmt) * 100).toFixed(1);
+                var barColor = earned >= targetAmt ? '#10b981' : '#18181b';
+
+                // Dot trail
+                var dots = '';
+                for (var k = 0; k < totalWorkDays; k++) {
+                    dots += '<div style="width:8px;height:8px;border-radius:50%;background:' + (k < doneWorkDays ? '#18181b' : '#f4f4f5') + ';border:1px solid ' + (k < doneWorkDays ? '#18181b' : '#e4e4e7') + '"></div>';
+                }
+
+                statsHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #f4f4f5">'
+                    // Left: days left
+                    + '<div style="padding:28px 32px;border-right:1px solid #f4f4f5">'
+                    + '<p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:#a1a1aa;margin-bottom:6px">Working days left</p>'
+                    + '<p style="font-size:48px;font-weight:900;color:#18181b;line-height:1">' + leftWorkDays + '</p>'
+                    + '<p style="font-size:11px;color:#a1a1aa;margin-top:6px">' + doneWorkDays + ' done &middot; ' + totalWorkDays + ' total this month</p>'
+                    + '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:12px">' + dots + '</div>'
+                    + '</div>'
+                    // Right: estimated completion
+                    + '<div style="padding:28px 32px">'
+                    + '<p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:#a1a1aa;margin-bottom:6px">Est. completion</p>'
+                    + '<p style="font-size:48px;font-weight:900;line-height:1;' + compStyle + '">' + compLabel + '</p>'
+                    + '<p style="font-size:11px;margin-top:6px;' + noteStyle + '">' + compNote + '</p>'
+                    + '<div style="margin-top:16px">'
+                    + '<div style="display:flex;justify-content:space-between;font-size:10px;font-weight:700;color:#a1a1aa;margin-bottom:4px">'
+                    + '<span>NTD ' + Math.round(earned).toLocaleString() + '</span><span>/ NTD ' + targetAmt.toLocaleString() + '</span>'
+                    + '</div>'
+                    + '<div style="height:6px;background:#f4f4f5;border-radius:999px;overflow:hidden">'
+                    + '<div style="height:100%;border-radius:999px;background:' + barColor + ';width:' + pct + '%;transition:width .6s"></div>'
+                    + '</div></div>'
+                    + '</div>'
+                    + '</div>';
+            } else {
+                statsHTML = '<div style="padding:20px 32px;color:#a1a1aa;font-size:13px;border-top:1px solid #f4f4f5">'
+                    + 'Select days per week above to see working days left and estimated completion date.'
+                    + '</div>';
+            }
+
+            panel.innerHTML = '<div style="background:#fff;border-radius:2.5rem;border:1px solid rgba(0,0,0,.05);box-shadow:0 1px 3px rgba(0,0,0,.04);overflow:hidden;margin-bottom:32px">'
+                + '<div style="padding:24px 32px;border-bottom:1px solid #f4f4f5;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">'
+                + '<div style="display:flex;align-items:center;gap:12px">'
+                + '<div style="width:40px;height:40px;background:#18181b;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+                + '<i data-lucide="calendar-clock" style="width:18px;height:18px;color:#fff"></i>'
+                + '</div>'
+                + '<div>'
+                + '<p style="font-size:15px;font-weight:800;color:#18181b">Work Schedule</p>'
+                + '<p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:#a1a1aa">'
+                + (wdpw ? wdpw + ' days / week' : 'How many days per week will you work?')
+                + '</p>'
+                + '</div></div>'
+                + '<div style="display:flex;gap:6px;flex-wrap:wrap">' + pills + '</div>'
+                + '</div>'
+                + statsHTML
+                + '</div>';
+
+            lucide.createIcons();
+        }
+
+        window.saveWorkDays = async function(days) {
+            var now = new Date();
+            var currentMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            var target = null;
+            for (var i = 0; i < state.targets.length; i++) {
+                if (state.targets[i].month === currentMonth) { target = state.targets[i]; break; }
+            }
+            if (!target) { alert('Please set a monthly target first on the Targets page.'); return; }
+            var res = await fetch('/api/targets', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ month: currentMonth, amount: target.amount, work_days_per_week: days })
+            });
+            if (res.ok) {
+                var updated = await res.json();
+                for (var i = 0; i < state.targets.length; i++) {
+                    if (state.targets[i].month === currentMonth) { state.targets[i] = updated; break; }
+                }
+                renderWorkPacePanel();
+            }
+        };
 
         window.toggleTable = () => {
             const container = document.getElementById('incomeTableContainer');
