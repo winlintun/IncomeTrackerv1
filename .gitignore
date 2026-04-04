@@ -9,5 +9,8 @@ coverage/
 instance
 *.db
 railway_backup.py
-
+railway_backup1.py
+backups/
 railway_backup/
+__pycache__
+__pycache__/*
