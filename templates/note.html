@@ -30,16 +30,17 @@
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
+  html, body { height: 100%; overflow: hidden; }
+
   body {
     font-family: 'Instrument Sans', sans-serif;
     background: var(--bg);
     color: var(--text);
-    min-height: 100vh;
+    height: 100%;
     display: flex;
     flex-direction: column;
   }
 
-  /* Top navbar */
   .app-nav {
     display: flex;
     align-items: center;
@@ -50,6 +51,7 @@
     flex-shrink: 0;
     gap: 12px;
     flex-wrap: wrap;
+    position: relative;
   }
   .app-nav-brand {
     display: flex;
@@ -100,12 +102,22 @@
     border: 1px solid var(--accent-border);
     color: var(--accent);
   }
+  .mobile-menu-btn {
+    display: none;
+    padding: 8px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text2);
+    cursor: pointer;
+  }
 
   /* notes area below nav */
   .notes-body {
     display: flex;
     flex: 1;
     overflow: hidden;
+    position: relative;
   }
 
   /* Sidebar */
@@ -117,6 +129,7 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    transition: transform 0.2s ease;
   }
 
   .sidebar-header {
@@ -340,7 +353,7 @@
   .editor-content::-webkit-scrollbar-track { background: transparent; }
   .editor-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-  #note-title-input {
+#note-title-input {
     background: transparent;
     border: none;
     outline: none;
@@ -353,6 +366,25 @@
     caret-color: var(--accent);
     resize: none;
     line-height: 1.25;
+    -webkit-appearance: none;
+  }
+
+  #note-title-input::placeholder { color: var(--text3); }
+
+  #note-body-input {
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: 'Instrument Sans', sans-serif;
+    font-size: 15px;
+    color: var(--text2);
+    width: 100%;
+    flex: 1;
+    resize: none;
+    line-height: 1.75;
+    caret-color: var(--accent);
+    min-height: 400px;
+    -webkit-appearance: none;
   }
 
   #note-title-input::placeholder { color: var(--text3); }
@@ -495,14 +527,61 @@
 
   .btn.danger:hover { background: rgba(201,85,74,0.15); }
 
-  @media (max-width: 640px) {
-    .sidebar { width: 260px; min-width: 260px; }
-    .editor-content { padding: 20px 16px; }
-    .editor-toolbar { padding: 12px 16px; }
-    #note-title-input { font-size: 24px; }
+  .app-nav-links.mobile-open {
+    display: flex !important;
+    flex-direction: column;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-top: none;
+    z-index: 100;
+    padding: 8px;
   }
-</style>
-</head>
+
+  .app-nav-links.mobile-open .app-nav-link {
+    padding: 12px 16px;
+    border-radius: 8px;
+  }
+
+  @media (max-width: 640px) {
+    .app-nav { padding: 8px 12px; }
+    .app-nav-links { display: none; }
+    .mobile-menu-btn { display: flex; }
+    .nav-dropdown { display: block; }
+    
+    .sidebar { 
+      position: fixed; 
+      left: 0; top: 52px; right: 0; bottom: 0; 
+      width: 100%; min-width: 100%; 
+      z-index: 10; 
+      transform: translateX(0);
+    }
+    .sidebar.hidden { transform: translateX(-100%); }
+    
+    .editor-pane { 
+      display: none; 
+      position: fixed; 
+      left: 0; top: 52px; right: 0; bottom: 0; 
+      background: var(--bg); 
+      z-index: 20; 
+      transform: translateX(100%);
+      transition: transform 0.2s ease;
+    }
+    .editor-pane.active { display: flex; transform: translateX(0); }
+    
+    .editor-content { padding: 16px; }
+    .editor-toolbar { padding: 12px 16px; flex-wrap: wrap; }
+    #note-title-input { font-size: 24px; }
+    .mobile-back { display: flex !important; }
+    .sidebar-header { padding: 16px; }
+    .new-btn { width: calc(100% - 32px); margin: 12px 16px 0; }
+    .note-item { padding: 12px 16px; }
+    .toast { left: 12px; right: 12px; bottom: 12px; text-align: center; }
+  }
+</style></head>
 <body>
 
 <nav class="app-nav">
@@ -517,7 +596,7 @@
     <span class="app-nav-title">IncomeTracker</span>
   </a>
 
-  <div class="app-nav-links">
+  <div class="app-nav-links" id="nav-links">
     <a class="app-nav-link" href="/?view=dashboard">Dashboard</a>
     <a class="app-nav-link" href="/?view=jobs">Jobs</a>
     <a class="app-nav-link" href="/?view=income">Tracking</a>
@@ -526,6 +605,11 @@
     <a class="app-nav-link" href="/?view=admin">Admin</a>
     <a class="app-nav-link notes-active" href="/notes">Notes</a>
   </div>
+  <button class="mobile-menu-btn" onclick="toggleNavMenu()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+      <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
+    </svg>
+  </button>
 </nav>
 
 <div class="notes-body">
@@ -568,6 +652,12 @@
 
   <div id="editor-active" style="display:none; flex-direction:column; height:100%;">
     <div class="editor-toolbar">
+      <button class="toolbar-btn mobile-back" onclick="showList()" title="Back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="13" height="13">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+        Back
+      </button>
       <span class="save-indicator" id="save-indicator">—</span>
       <div class="spacer"></div>
       <button class="toolbar-btn" id="pin-btn" onclick="togglePin()" title="Pin note">
@@ -825,6 +915,44 @@ function showToast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function showList() {
+  document.querySelector('.sidebar').classList.remove('hidden');
+  document.getElementById('editor-pane').classList.remove('active');
+}
+
+function showEditor() {
+  document.querySelector('.sidebar').classList.add('hidden');
+  document.getElementById('editor-pane').classList.add('active');
+}
+
+function toggleNavMenu() {
+  document.getElementById('nav-links').classList.toggle('mobile-open');
+}
+
+function openNote(id) {
+  if (saveTimer) { clearTimeout(saveTimer); saveNow(); }
+  activeNote = notes.find(n => n.id === id);
+  if (!activeNote) return;
+
+  document.getElementById('empty-editor').style.display = 'none';
+  const ae = document.getElementById('editor-active');
+  ae.style.display = 'flex';
+
+  const titleEl = document.getElementById('note-title-input');
+  titleEl.value = activeNote.title;
+  autoResize(titleEl);
+
+  document.getElementById('note-body-input').value = activeNote.content;
+  document.getElementById('note-date-line').textContent = 'Last edited ' + formatDate(activeNote.updated_at);
+  setSaveIndicator('saved');
+  updatePinBtn();
+  renderList(getFilteredNotes());
+  
+  if (window.innerWidth <= 640) {
+    showEditor();
+  }
 }
 
 window.addEventListener('beforeunload', () => {

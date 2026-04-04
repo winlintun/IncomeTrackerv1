@@ -282,7 +282,7 @@
                         <button onclick="window.setView('targets')" class="px-6 py-2 rounded-xl text-sm font-bold transition-all ${state.currentView === 'targets' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}">Targets</button>
                         <button onclick="window.setView('summary')" class="px-6 py-2 rounded-xl text-sm font-bold transition-all ${state.currentView === 'summary' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}">Summary</button>
                         ${state.user.role === 'admin' ? `<button onclick="window.setView('admin')" class="px-6 py-2 rounded-xl text-sm font-bold transition-all ${state.currentView === 'admin' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}">Admin</button>` : ''}
-                        <button onclick="window.setView('notes')" class="px-6 py-2 rounded-xl text-sm font-bold transition-all ${state.currentView === 'notes' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}">Notes</button>
+                        <button onclick="window.location.href='/notes'" class="px-6 py-2 rounded-xl text-sm font-bold transition-all ${state.currentView === 'notes' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}">Notes</button>
                     </div>
 
                     <div class="flex items-center gap-2 md:gap-4">
@@ -329,7 +329,7 @@
                                         <i data-lucide="shield-check"></i> Admin
                                     </button>
                                 ` : ''}
-                                <button onclick="window.setView('notes')" class="flex items-center gap-4 p-4 rounded-2xl font-bold ${state.currentView === 'notes' ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:bg-zinc-50'}">
+                                <button onclick="window.location.href='/notes'" class="flex items-center gap-4 p-4 rounded-2xl font-bold ${state.currentView === 'notes' ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:bg-zinc-50'}">
                                     <i data-lucide="notebook-pen"></i> Notes
                                 </button>
                             </div>
