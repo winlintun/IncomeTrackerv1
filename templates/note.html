@@ -786,6 +786,10 @@ function openNote(id) {
   setSaveIndicator('saved');
   updatePinBtn();
   renderList(getFilteredNotes());
+  
+  if (window.innerWidth <= 640) {
+    showEditor();
+  }
 }
 
 function updatePinBtn() {
@@ -929,30 +933,6 @@ function showEditor() {
 
 function toggleNavMenu() {
   document.getElementById('nav-links').classList.toggle('mobile-open');
-}
-
-function openNote(id) {
-  if (saveTimer) { clearTimeout(saveTimer); saveNow(); }
-  activeNote = notes.find(n => n.id === id);
-  if (!activeNote) return;
-
-  document.getElementById('empty-editor').style.display = 'none';
-  const ae = document.getElementById('editor-active');
-  ae.style.display = 'flex';
-
-  const titleEl = document.getElementById('note-title-input');
-  titleEl.value = activeNote.title;
-  autoResize(titleEl);
-
-  document.getElementById('note-body-input').value = activeNote.content;
-  document.getElementById('note-date-line').textContent = 'Last edited ' + formatDate(activeNote.updated_at);
-  setSaveIndicator('saved');
-  updatePinBtn();
-  renderList(getFilteredNotes());
-  
-  if (window.innerWidth <= 640) {
-    showEditor();
-  }
 }
 
 window.addEventListener('beforeunload', () => {

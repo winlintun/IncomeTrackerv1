@@ -43,13 +43,23 @@ def init_db_with_retry(app, retries=5, delay=3):
         try:
             with app.app_context():
                 db.create_all()
-                # Add work_days_per_week column if it does not exist (existing DBs)
-                try:
-                    db.session.execute(text("ALTER TABLE target ADD COLUMN work_days_per_week FLOAT"))
-                    db.session.commit()
-                    print("Added work_days_per_week column.")
-                except Exception:
-                    db.session.rollback()  # column already exists, that is fine
+                db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+                if 'postgresql' in db_uri:
+                    result = db.session.execute(text("""
+                        SELECT column_name FROM information_schema.columns 
+                        WHERE table_name = 'target' AND column_name = 'work_days_per_week'
+                    """))
+                    if result.fetchone() is None:
+                        db.session.execute(text("ALTER TABLE target ADD COLUMN work_days_per_week FLOAT"))
+                        db.session.commit()
+                        print("Added work_days_per_week column.")
+                elif 'sqlite' in db_uri:
+                    result = db.session.execute(text("PRAGMA table_info(target)"))
+                    columns = [row[1] for row in result]
+                    if 'work_days_per_week' not in columns:
+                        db.session.execute(text("ALTER TABLE target ADD COLUMN work_days_per_week FLOAT"))
+                        db.session.commit()
+                        print("Added work_days_per_week column.")
                 db.session.execute(text('SELECT 1'))
                 print("Database connected.")
                 return
@@ -191,13 +201,15 @@ def manage_income():
         data = request.json
         job = Job.query.get(data['job_id'])
         
-        # Auto-calculate amount if not provided or 0
+        if not job:
+            return jsonify({'error': 'Job not found'}), 400
+        
         amount = data.get('amount')
         try:
-            if (amount is None or amount == '' or float(amount) == 0) and job:
+            if amount is None or amount == '' or float(amount) == 0:
                 amount = job.hourly_rate * job.hours_per_day
             else:
-                amount = float(amount) if amount else 0
+                amount = float(amount)
         except ValueError:
             return jsonify({'error': 'Invalid amount value'}), 400
 
@@ -206,7 +218,7 @@ def manage_income():
             user_id=current_user.id,
             date=data['date'],
             amount=amount,
-            job_name=job.name if job else 'Unknown'
+            job_name=job.name
         )
         db.session.add(new_record)
         db.session.commit()
@@ -330,7 +342,6 @@ def admin_stats():
     total_records = IncomeRecord.query.count()
     total_income = db.session.query(db.func.sum(IncomeRecord.amount)).scalar() or 0
     
-    # Recent activity
     recent_records = IncomeRecord.query.order_by(IncomeRecord.created_at.desc()).limit(10).all()
     
     return jsonify({
@@ -343,7 +354,7 @@ def admin_stats():
             'amount': r.amount,
             'date': r.date,
             'job_name': r.job_name,
-            'username': User.query.get(r.user_id).username
+            'username': r.user.username if r.user else 'Unknown'
         } for r in recent_records]
     })
 
