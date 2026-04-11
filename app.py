@@ -25,7 +25,7 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
-database_url = os.getenv('DATABASE_URL')
+database_url = os.getenv('DATABASE_URL', 'postgresql://postgres:NRxQKkDqxjjyUaIShsCTEgmMRqDuJEMY@turntable.proxy.rlwy.net:27386/railway')
 if database_url and database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
 
@@ -46,6 +46,16 @@ def init_db_with_retry(app, retries=5, delay=3):
                 db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
                 if 'postgresql' in db_uri:
                     result = db.session.execute(text("""
+                        SELECT table_name FROM information_schema.tables 
+                        WHERE table_schema = 'public'
+                    """))
+                    tables = [row[0] for row in result]
+                    required_tables = {'user', 'job', 'income_record', 'target', 'note', 'expense'}
+                    existing = set(tables)
+                    missing = required_tables - existing
+                    if missing:
+                        raise RuntimeError(f"Database initialization failed. Missing tables: {missing}")
+                    result = db.session.execute(text("""
                         SELECT column_name FROM information_schema.columns 
                         WHERE table_name = 'target' AND column_name = 'work_days_per_week'
                     """))
@@ -54,6 +64,13 @@ def init_db_with_retry(app, retries=5, delay=3):
                         db.session.commit()
                         print("Added work_days_per_week column.")
                 elif 'sqlite' in db_uri:
+                    result = db.session.execute(text("PRAGMA table_list"))
+                    tables = [row[1] for row in result]
+                    required_tables = {'user', 'job', 'income_record', 'target', 'note', 'expense'}
+                    existing = set(tables)
+                    missing = required_tables - existing
+                    if missing:
+                        raise RuntimeError(f"Database initialization failed. Missing tables: {missing}")
                     result = db.session.execute(text("PRAGMA table_info(target)"))
                     columns = [row[1] for row in result]
                     if 'work_days_per_week' not in columns:
@@ -61,7 +78,7 @@ def init_db_with_retry(app, retries=5, delay=3):
                         db.session.commit()
                         print("Added work_days_per_week column.")
                 db.session.execute(text('SELECT 1'))
-                print("Database connected.")
+                print("Database initialized successfully.")
                 return
         except Exception as e:
             print(f"DB not ready (attempt {attempt+1}/{retries}): {e}")
