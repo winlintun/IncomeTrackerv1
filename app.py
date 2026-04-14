@@ -256,13 +256,36 @@ def manage_income():
         'job_name': r.job_name
     } for r in records])
 
-@app.route('/api/income/<int:record_id>', methods=['DELETE'])
+@app.route('/api/income/<int:record_id>', methods=['GET', 'PUT', 'DELETE'])
 @login_required
-def delete_income(record_id):
-    record = IncomeRecord.query.filter_by(id=record_id, user_id=current_user.id).first_or_404()
-    db.session.delete(record)
-    db.session.commit()
-    return jsonify({'message': 'Record deleted'})
+def manage_income_item(record_id):
+    record = IncomeRecord.query.filter_by(id=record_id, user_id=current_user.id).first()
+    if not record:
+        return jsonify({'error': 'Record not found'}), 404
+
+    if request.method == 'DELETE':
+        db.session.delete(record)
+        db.session.commit()
+        return jsonify({'message': 'Record deleted'})
+
+    if request.method == 'PUT':
+        data = request.json
+        try:
+            record.job_id = int(data['job_id'])
+            record.date = data['date']
+            record.amount = float(data['amount'])
+            job = db.session.get(Job, record.job_id)
+            record.job_name = job.name if job else ''
+            db.session.commit()
+            return jsonify({
+                'id': record.id,
+                'job_id': record.job_id,
+                'job_name': record.job_name,
+                'date': record.date,
+                'amount': record.amount
+            })
+        except (ValueError, TypeError, KeyError) as e:
+            return jsonify({'error': 'Invalid data'}), 400
 
 # --- Target Routes ---
 

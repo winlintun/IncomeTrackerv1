@@ -241,6 +241,23 @@ class TestIncome:
         response = auth_client.delete(f'/api/income/{record_id}')
         assert response.status_code == 200
 
+    def test_update_income(self, auth_client, sample_job):
+        create_response = auth_client.post('/api/income', json={
+            'job_id': sample_job['id'],
+            'date': '2026-04-09',
+            'amount': 100
+        })
+        record_id = create_response.get_json()['id']
+        response = auth_client.put(f'/api/income/{record_id}', json={
+            'job_id': sample_job['id'],
+            'date': '2026-04-15',
+            'amount': 200
+        })
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['amount'] == 200.0
+        assert data['date'] == '2026-04-15'
+
 
 class TestTargets:
     def test_create_target(self, auth_client):

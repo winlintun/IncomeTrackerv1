@@ -55,6 +55,35 @@
     <div id="app" class="max-w-7xl mx-auto px-4 py-8">
         <!-- App content will be injected here -->
     </div>
+    <div id="toast" class="toast"></div>
+    <style>
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #18181b;
+            border-radius: 12px;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: none;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .toast.success { background: #10b981; }
+        .toast.error { background: #ef4444; }
+        .toast i { width: 18px; height: 18px; }
+    </style>
 
     <script type="module">
         // Basic SPA Router and State Management
@@ -67,8 +96,17 @@
             currentView: 'dashboard',
             authView: 'login',
             loading: true,
-            mobileMenuOpen: false
+            mobileMenuOpen: false,
+            selectedMonth: new Date().toISOString().slice(0, 7)
         };
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            if (!toast) return;
+            toast.textContent = message;
+            toast.className = 'toast ' + type + ' show';
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
 
         async function init() {
             const res = await fetch('/api/auth/me');
@@ -102,6 +140,7 @@
             const app = document.getElementById('app');
             if (state.loading) {
                 app.innerHTML = '<div class="flex items-center justify-center h-screen"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-zinc-900"></div></div>';
+                lucide.createIcons();
                 return;
             }
 
@@ -354,6 +393,80 @@
             render();
         };
 
+        window.changeMonth = (delta) => {
+            if (delta === 0) {
+                state.selectedMonth = new Date().toISOString().slice(0, 7);
+            } else {
+                const [year, month] = state.selectedMonth.split('-').map(Number);
+                const newDate = new Date(year, month - 1 + delta, 1);
+                state.selectedMonth = newDate.toISOString().slice(0, 7);
+            }
+            render();
+        };
+
+        window.showQuickLogModal = () => {
+            const modal = document.getElementById('modal-container');
+            const today = new Date().toISOString().slice(0, 10);
+            modal.innerHTML = `
+                <div class="fixed inset-0 bg-zinc-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4">
+                    <div class="bg-white p-10 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-black/5 animate-slide">
+                        <div class="flex items-center justify-between mb-8">
+                            <h3 class="text-3xl font-extrabold tracking-tight">Quick Log</h3>
+                            <button onclick="this.closest('.fixed').remove()" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
+                                <i data-lucide="x" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                        <form id="quickLogForm" class="space-y-6">
+                            <div>
+                                <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Job</label>
+                                <select name="job_id" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
+                                    <option value="" disabled selected>Select a job</option>
+                                    ${state.jobs.map(job => `<option value="${job.id}" data-rate="${job.hourly_rate}" data-hours="${job.hours_per_day}">${job.name}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Date</label>
+                                <input type="date" name="date" value="${today}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Amount (NTD)</label>
+                                <input type="number" name="amount" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" placeholder="Auto-calculated from job rate">
+                            </div>
+                            <div class="flex gap-4 mt-10">
+                                <button type="button" onclick="this.closest('.fixed').remove()" class="flex-1 py-4 border border-zinc-100 rounded-2xl font-bold text-zinc-400 hover:bg-zinc-50 transition-all">Cancel</button>
+                                <button type="submit" class="flex-1 py-4 bg-emerald-500 text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100">Log Income</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+
+            document.getElementById('quickLogForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const data = Object.fromEntries(formData.entries());
+                if (!data.amount) {
+                    const select = e.target.job_id;
+                    const option = select.options[select.selectedIndex];
+                    data.amount = option.dataset.rate * option.dataset.hours;
+                }
+                const res = await fetch('/api/income', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (res.ok) {
+                    document.querySelector('.fixed').remove();
+                    await fetchData();
+                    render();
+                    showToast('Income logged successfully!');
+                } else {
+                    showToast('Failed to log income', 'error');
+                }
+            };
+        };
+
         window.logout = async () => {
             await fetch('/api/auth/logout');
             state.user = null;
@@ -373,13 +486,17 @@
         }
 
         function renderDashboard(container) {
-            const currentMonth = new Date().toISOString().slice(0, 7);
+            const currentMonth = state.selectedMonth;
             const monthlyIncome = state.income
                 .filter(i => i.date.startsWith(currentMonth))
                 .reduce((sum, i) => sum + i.amount, 0);
             const target = state.targets.find(t => t.month === currentMonth)?.amount || 0;
             const progress = target > 0 ? (monthlyIncome / target) * 100 : 0;
             const exceeded = monthlyIncome > target ? monthlyIncome - target : 0;
+            
+            const [year, month] = currentMonth.split('-');
+            const monthDate = new Date(year, month - 1);
+            const monthName = monthDate.toLocaleString('default', { month: 'long', year: 'numeric' });
 
             // Expensive
             const monthlyExpenses = state.expenses
@@ -403,13 +520,35 @@
 
             container.innerHTML = `
                 <div class="animate-slide space-y-6 md:space-y-8">
+                    <!-- Quick Actions Bar -->
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <!-- Month Navigation -->
+                        <div class="flex items-center gap-2 bg-white p-2 rounded-2xl border border-black/5 shadow-sm">
+                            <button onclick="window.changeMonth(-1)" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-all">
+                                <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                            </button>
+                            <span class="px-4 py-2 font-bold text-zinc-900 min-w-[180px] text-center">${monthName}</span>
+                            <button onclick="window.changeMonth(1)" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-all">
+                                <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                            </button>
+                            <button onclick="window.changeMonth(0)" class="px-4 py-2 rounded-xl bg-zinc-900 text-white text-xs font-bold hover:bg-zinc-800 transition-all ml-2">
+                                Today
+                            </button>
+                        </div>
+                        <!-- Quick Log Button -->
+                        <button onclick="window.showQuickLogModal()" class="bg-emerald-500 text-white px-8 py-4 rounded-2xl font-bold hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100 flex items-center gap-2">
+                            <i data-lucide="plus-circle" class="w-5 h-5"></i>
+                            <span>Quick Log Income</span>
+                        </button>
+                    </div>
+
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
                         <!-- Monthly Progress Card -->
                         <div class="lg:col-span-2 bg-white p-6 md:p-10 rounded-[2.5rem] border border-black/5 shadow-sm relative overflow-hidden">
                             <div class="flex flex-col sm:flex-row justify-between items-start mb-8 md:mb-10 gap-4">
                                 <div>
                                     <h2 class="text-2xl md:text-3xl font-extrabold tracking-tight mb-2">Monthly Progress</h2>
-                                    <p class="text-zinc-400 font-medium text-sm">Tracking ${new Date().toLocaleString('default', { month: 'long' })} data</p>
+                                    <p class="text-zinc-400 font-medium text-sm">Tracking ${monthName}</p>
                                 </div>
                                 <div class="sm:text-right">
                                     <p class="text-3xl md:text-4xl font-black text-zinc-900">NTD ${monthlyIncome.toLocaleString()}</p>
@@ -707,9 +846,11 @@
         };
 
         function renderIncome(container) {
-            const currentMonth = new Date().toISOString().slice(0, 7);
-            const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-            const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getDay();
+            const currentMonth = state.selectedMonth;
+            const [year, month] = currentMonth.split('-').map(Number);
+            const daysInMonth = new Date(year, month, 0).getDate();
+            const firstDay = new Date(year, month - 1, 1).getDay();
+            const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
             
             const incomeByDay = {};
             state.income.filter(i => i.date.startsWith(currentMonth)).forEach(i => {
@@ -737,10 +878,10 @@
                         <!-- Calendar View -->
                         <div class="lg:col-span-2 bg-white p-10 rounded-[2.5rem] border border-black/5 shadow-sm">
                             <div class="flex justify-between items-center mb-8">
-                                <h3 class="text-xl font-extrabold tracking-tight">${new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
+                                <h3 class="text-xl font-extrabold tracking-tight">${monthName}</h3>
                                 <div class="flex gap-2">
-                                    <button class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
-                                    <button class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
+                                    <button onclick="window.changeMonth(-1)" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
+                                    <button onclick="window.changeMonth(1)" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
                                 </div>
                             </div>
                             <div class="grid grid-cols-7 gap-4">
@@ -748,7 +889,7 @@
                                 ${Array(firstDay).fill(0).map(() => `<div class="aspect-square"></div>`).join('')}
                                 ${Array(daysInMonth).fill(0).map((_, i) => {
                                     const day = i + 1;
-                                    const dateStr = `${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                                    const dateStr = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
                                     const records = incomeByDay[day] || [];
                                     const mainJob = records.length > 0 ? state.jobs.find(j => j.id === records[0].job_id) : null;
                                     const total = records.reduce((sum, r) => sum + r.amount, 0);
@@ -795,9 +936,14 @@
                                                         <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-400">${record.date} • ${record.job_name}</p>
                                                     </div>
                                                 </div>
-                                                <button onclick="window.deleteIncome(${record.id})" class="w-10 h-10 rounded-xl bg-zinc-50 text-zinc-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100">
-                                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                                </button>
+                                                <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                                    <button onclick="window.editIncome(${record.id}, ${record.amount}, ${record.job_id}, '${record.date}')" class="w-10 h-10 rounded-xl bg-zinc-50 text-zinc-300 hover:text-zinc-900 hover:bg-zinc-100 flex items-center justify-center transition-all">
+                                                        <i data-lucide="edit-3" class="w-4 h-4"></i>
+                                                    </button>
+                                                    <button onclick="window.deleteIncome(${record.id})" class="w-10 h-10 rounded-xl bg-zinc-50 text-zinc-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all">
+                                                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                                    </button>
+                                                </div>
                                             </div>
                                         `;
                                     }).join('')}
@@ -1024,10 +1170,12 @@
                 
                 if (res.ok) {
                     await fetchData();
+                    document.querySelector('.fixed').remove();
                     render();
+                    showToast('Income logged successfully!');
                 } else {
                     const err = await res.json();
-                    alert('Error logging income: ' + (err.error || 'Unknown error'));
+                    showToast(err.error || 'Failed to log income', 'error');
                 }
             };
         };
@@ -1057,14 +1205,72 @@
 
         window.deleteIncome = async (id) => {
             if (confirm('Delete this income record?')) {
-                await fetch(`/api/income/${id}`, { method: 'DELETE' });
-                await fetchData();
-                render();
+                const res = await fetch(`/api/income/${id}`, { method: 'DELETE' });
+                if (res.ok) {
+                    await fetchData();
+                    render();
+                    showToast('Income record deleted');
+                } else {
+                    showToast('Failed to delete record', 'error');
+                }
             }
         };
 
+        window.editIncome = async (id, currentAmount, currentJobId, currentDate) => {
+            const modal = document.getElementById('modal-container');
+            modal.innerHTML = `
+                <div class="fixed inset-0 bg-zinc-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4">
+                    <div class="bg-white p-10 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-black/5 animate-slide">
+                        <h3 class="text-3xl font-extrabold mb-8 tracking-tight">Edit Income</h3>
+                        <form id="editIncomeForm" class="space-y-6">
+                            <div>
+                                <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Job</label>
+                                <select name="job_id" id="editJobSelect" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
+                                    ${state.jobs.map(job => `<option value="${job.id}" ${job.id == currentJobId ? 'selected' : ''} data-rate="${job.hourly_rate}" data-hours="${job.hours_per_day}">${job.name}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Date</label>
+                                <input type="date" name="date" value="${currentDate}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Amount (NTD)</label>
+                                <input type="number" name="amount" value="${currentAmount}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
+                            </div>
+                            <div class="flex gap-4 mt-10">
+                                <button type="button" onclick="this.closest('.fixed').remove()" class="flex-1 py-4 border border-zinc-100 rounded-2xl font-bold text-zinc-400 hover:bg-zinc-50 transition-all">Cancel</button>
+                                <button type="submit" class="flex-1 py-4 bg-zinc-900 text-white rounded-2xl font-bold hover:bg-zinc-800 transition-all shadow-lg shadow-zinc-100">Update</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('editIncomeForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const data = Object.fromEntries(formData.entries());
+                const res = await fetch(`/api/income/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (res.ok) {
+                    await fetchData();
+                    document.querySelector('.fixed').remove();
+                    render();
+                    showToast('Income updated successfully!');
+                } else {
+                    const err = await res.json();
+                    showToast(err.error || 'Failed to update income', 'error');
+                }
+            };
+        };
+
         function renderTargets(container) {
-            const currentMonth = new Date().toISOString().slice(0, 7);
+            const currentMonth = state.selectedMonth;
+            const [year, month] = currentMonth.split('-').map(Number);
+            const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
             const monthlyIncome = state.income
                 .filter(i => i.date.startsWith(currentMonth))
                 .reduce((sum, i) => sum + i.amount, 0);
@@ -1088,8 +1294,16 @@
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
                         <div class="lg:col-span-2 bg-white p-10 rounded-[2.5rem] border border-black/5 shadow-sm">
                             <div class="flex justify-between items-center mb-10">
-                                <h3 class="text-xl font-extrabold tracking-tight">Current Month Progress</h3>
-                                <span class="px-4 py-2 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-400 uppercase tracking-widest">${new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}</span>
+                                <h3 class="text-xl font-extrabold tracking-tight">Month Progress</h3>
+                                <div class="flex items-center gap-2">
+                                    <button onclick="window.changeMonth(-1)" class="w-8 h-8 rounded-lg bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
+                                        <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                                    </button>
+                                    <span class="px-4 py-2 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-400 uppercase tracking-widest">${monthName}</span>
+                                    <button onclick="window.changeMonth(1)" class="w-8 h-8 rounded-lg bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
+                                        <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
                             </div>
                             
                             <div class="relative h-64 flex items-center justify-center mb-10">
@@ -1236,17 +1450,17 @@
                         </div>
                     </div>
 
-                    <!-- Auto-sliding Chart Section -->
+                    <!-- Chart Section -->
                     <div class="bg-white p-6 md:p-10 rounded-[2.5rem] border border-black/5 shadow-sm relative overflow-hidden">
                         <div class="flex justify-between items-center mb-8 md:mb-10">
                             <div>
-                                <h3 id="summaryChartTitle" class="text-lg md:text-xl font-extrabold tracking-tight">Job Project Income</h3>
-                                <p class="text-zinc-400 text-[10px] md:text-xs font-medium mt-1">Automatically cycling through different views</p>
+                                <h3 class="text-lg md:text-xl font-extrabold tracking-tight">Income Analysis</h3>
+                                <p class="text-zinc-400 text-[10px] md:text-xs font-medium mt-1">Select chart type below</p>
                             </div>
-                            <div class="flex gap-2" id="chartIndicators">
-                                <div class="w-2 h-2 rounded-full bg-zinc-900 transition-all duration-500"></div>
-                                <div class="w-2 h-2 rounded-full bg-zinc-200 transition-all duration-500"></div>
-                                <div class="w-2 h-2 rounded-full bg-zinc-200 transition-all duration-500"></div>
+                            <div class="flex gap-2 bg-zinc-50 p-1 rounded-xl border border-black/5">
+                                <button onclick="window.setSummaryChart('bar')" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all bg-zinc-900 text-white" id="chartBtn-bar">Bar</button>
+                                <button onclick="window.setSummaryChart('line')" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-900 transition-all" id="chartBtn-line">Line</button>
+                                <button onclick="window.setSummaryChart('polarArea')" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-900 transition-all" id="chartBtn-polarArea">Polar</button>
                             </div>
                         </div>
                         <div class="h-[300px] md:h-[400px] relative">
@@ -1275,12 +1489,23 @@
             `;
             lucide.createIcons();
 
-            let currentChartType = 0;
-            const chartTypes = ['bar', 'line', 'polarArea'];
-            const chartTitles = ['Job Project Income (Bar)', 'Income Trends (Line)', 'Job Distribution (Polar)'];
             let summaryChart = null;
+            let currentChartType = 'bar';
 
-            const updateChart = () => {
+            window.setSummaryChart = (type) => {
+                currentChartType = type;
+                document.querySelectorAll('[id^="chartBtn-"]').forEach(btn => {
+                    btn.className = btn.className.replace('bg-zinc-900 text-white', 'text-zinc-400 hover:text-zinc-900');
+                    btn.className = btn.className.replace('bg-emerald-500 text-white', 'text-zinc-400 hover:text-zinc-900');
+                });
+                const activeBtn = document.getElementById('chartBtn-' + type);
+                if (activeBtn) {
+                    activeBtn.className = activeBtn.className.replace('text-zinc-400 hover:text-zinc-900', 'bg-emerald-500 text-white');
+                }
+                updateSummaryChart();
+            };
+
+            const updateSummaryChart = () => {
                 if (summaryChart) summaryChart.destroy();
                 
                 const ctx = document.getElementById('summaryChart');
@@ -1296,48 +1521,33 @@
                     };
                 }).filter(j => j.total > 0);
 
-                document.getElementById('summaryChartTitle').innerText = chartTitles[currentChartType];
-                const indicators = document.getElementById('chartIndicators').children;
-                Array.from(indicators).forEach((ind, i) => {
-                    ind.className = `w-2 h-2 rounded-full transition-all duration-500 ${i === currentChartType ? 'bg-zinc-900 w-6' : 'bg-zinc-200'}`;
-                });
-
                 summaryChart = new Chart(ctx, {
-                    type: chartTypes[currentChartType],
+                    type: currentChartType,
                     data: {
                         labels: jobTotals.map(j => j.name),
                         datasets: [{
                             label: 'Income NTD',
                             data: jobTotals.map(j => j.total),
-                            backgroundColor: chartTypes[currentChartType] === 'line' ? 'rgba(24, 24, 27, 0.05)' : jobTotals.map(j => j.color),
-                            borderColor: chartTypes[currentChartType] === 'line' ? '#18181b' : 'transparent',
-                            borderWidth: chartTypes[currentChartType] === 'line' ? 4 : 0,
-                            fill: chartTypes[currentChartType] === 'line',
+                            backgroundColor: currentChartType === 'line' ? 'rgba(24, 24, 27, 0.05)' : jobTotals.map(j => j.color),
+                            borderColor: currentChartType === 'line' ? '#18181b' : 'transparent',
+                            borderWidth: currentChartType === 'line' ? 4 : 0,
+                            fill: currentChartType === 'line',
                             tension: 0.4
                         }]
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
-                        plugins: { legend: { display: chartTypes[currentChartType] === 'polarArea' } },
-                        scales: chartTypes[currentChartType] === 'polarArea' ? {} : {
+                        plugins: { legend: { display: currentChartType === 'polarArea' } },
+                        scales: currentChartType === 'polarArea' ? {} : {
                             y: { beginAtZero: true, grid: { display: false } },
                             x: { grid: { display: false } }
                         }
                     }
                 });
-
-                currentChartType = (currentChartType + 1) % chartTypes.length;
             };
 
-            updateChart();
-            const interval = setInterval(() => {
-                if (state.currentView !== 'summary') {
-                    clearInterval(interval);
-                    return;
-                }
-                updateChart();
-            }, 5000);
+            updateSummaryChart();
         }
 
         async function renderAdmin(container) {
@@ -1785,7 +1995,7 @@
         }
 
         function renderExpenses(container) {
-            const currentMonth = new Date().toISOString().slice(0, 7);
+            const currentMonth = state.selectedMonth;
             const monthlyExpenses = state.expenses.filter(e => e.date.startsWith(currentMonth));
             const totalMonthly = monthlyExpenses.reduce((sum, e) => sum + e.amount, 0);
             const monthlyIncome = state.income
