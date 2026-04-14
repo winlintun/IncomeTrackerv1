@@ -14,3 +14,4 @@ backups/
 railway_backup/
 __pycache__
 __pycache__/*
+read_and_fix.md

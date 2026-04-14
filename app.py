@@ -17,7 +17,7 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from flask_bcrypt import Bcrypt
 from dotenv import load_dotenv
 from models import db, User, Job, IncomeRecord, Target, Note, Expense
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 import time
 
@@ -216,7 +216,7 @@ def manage_job_item(job_id):
 def manage_income():
     if request.method == 'POST':
         data = request.json
-        job = Job.query.get(data['job_id'])
+        job = db.session.get(Job, data['job_id'])
         
         if not job:
             return jsonify({'error': 'Job not found'}), 400
@@ -325,7 +325,10 @@ def admin_users():
 def admin_manage_user(user_id):
     if current_user.role != 'admin':
         return jsonify({'error': 'Unauthorized'}), 403
-    user = User.query.get_or_404(user_id)
+    user = db.session.get(User, user_id)
+    if not user:
+        from flask import abort
+        abort(404)
     
     if request.method == 'PUT':
         data = request.json
@@ -441,7 +444,7 @@ def manage_note_item(note_id):
             note.content = data['content']
         if 'pinned' in data:
             note.pinned = data['pinned']
-        note.updated_at = datetime.utcnow()
+        note.updated_at = datetime.now(timezone.utc)
         db.session.commit()
         return jsonify({
             'id': note.id,
@@ -544,7 +547,7 @@ def manage_expense_item(expense_id):
 def expense_stats():
     from sqlalchemy import func
     expenses = Expense.query.filter_by(user_id=current_user.id).all()
-    current_month = datetime.utcnow().strftime('%Y-%m')
+    current_month = datetime.now(timezone.utc).strftime('%Y-%m')
 
     monthly = [e for e in expenses if e.date.startswith(current_month)]
     monthly_total = sum(e.amount for e in monthly)
