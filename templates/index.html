@@ -86,6 +86,10 @@
     </style>
 
     <script type="module">
+        const pad2 = (n) => String(n).padStart(2, '0');
+        const localYM = (date = new Date()) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+        const localYMD = (date = new Date()) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+
         // Basic SPA Router and State Management
         let state = {
             user: null,
@@ -97,7 +101,7 @@
             authView: 'login',
             loading: true,
             mobileMenuOpen: false,
-            selectedMonth: new Date().toISOString().slice(0, 7)
+            selectedMonth: localYM()
         };
 
         function showToast(message, type = 'success') {
@@ -395,18 +399,18 @@
 
         window.changeMonth = (delta) => {
             if (delta === 0) {
-                state.selectedMonth = new Date().toISOString().slice(0, 7);
+                state.selectedMonth = localYM();
             } else {
                 const [year, month] = state.selectedMonth.split('-').map(Number);
                 const newDate = new Date(year, month - 1 + delta, 1);
-                state.selectedMonth = newDate.toISOString().slice(0, 7);
+                state.selectedMonth = localYM(newDate);
             }
             render();
         };
 
         window.showQuickLogModal = () => {
             const modal = document.getElementById('modal-container');
-            const today = new Date().toISOString().slice(0, 10);
+            const today = localYMD();
             modal.innerHTML = `
                 <div class="fixed inset-0 bg-zinc-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4">
                     <div class="bg-white p-10 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-black/5 animate-slide">
@@ -509,7 +513,7 @@
             const last7Days = [...Array(7)].map((_, i) => {
                 const d = new Date();
                 d.setDate(d.getDate() - i);
-                return d.toISOString().slice(0, 10);
+                return localYMD(d);
             }).reverse();
 
             const weeklyData = last7Days.map(date => {
@@ -731,39 +735,55 @@
                         </button>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        ${state.jobs.map(job => `
-                            <div class="bg-white p-8 rounded-[2.5rem] border border-black/5 shadow-sm group relative overflow-hidden transition-all hover:shadow-xl hover:-translate-y-1">
-                                <div class="absolute top-0 left-0 w-full h-2" style="background-color: ${job.color}"></div>
-                                <div class="flex justify-between items-start mb-6">
-                                    <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-lg" style="background-color: ${job.color}">
-                                        <i data-lucide="briefcase" class="w-6 h-6"></i>
+                        ${state.jobs.map(job => {
+                            const totalEarned = state.income
+                                .filter(i => i.job_id === job.id)
+                                .reduce((sum, i) => sum + i.amount, 0);
+                            const totalEarnedMonth = state.income
+                                .filter(i => i.job_id === job.id && i.date.startsWith(state.selectedMonth))
+                                .reduce((sum, i) => sum + i.amount, 0);
+                            return `
+                                <div class="bg-white p-8 rounded-[2.5rem] border border-black/5 shadow-sm group relative overflow-hidden transition-all hover:shadow-xl hover:-translate-y-1">
+                                    <div class="absolute top-0 left-0 w-full h-2" style="background-color: ${job.color}"></div>
+                                    <div class="flex justify-between items-start mb-6">
+                                        <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-lg" style="background-color: ${job.color}">
+                                            <i data-lucide="briefcase" class="w-6 h-6"></i>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button onclick="window.showJobModal(${JSON.stringify(job).replace(/"/g, '&quot;')})" class="w-8 h-8 rounded-lg bg-zinc-50 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 flex items-center justify-center transition-all">
+                                                <i data-lucide="edit-3" class="w-4 h-4"></i>
+                                            </button>
+                                            <button onclick="window.deleteJob(${job.id})" class="w-8 h-8 rounded-lg bg-zinc-50 text-zinc-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all">
+                                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div class="flex gap-2">
-                                        <button onclick="window.showJobModal(${JSON.stringify(job).replace(/"/g, '&quot;')})" class="w-8 h-8 rounded-lg bg-zinc-50 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 flex items-center justify-center transition-all">
-                                            <i data-lucide="edit-3" class="w-4 h-4"></i>
-                                        </button>
-                                        <button onclick="window.deleteJob(${job.id})" class="w-8 h-8 rounded-lg bg-zinc-50 text-zinc-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all">
-                                            <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                        </button>
+                                    <h4 class="text-2xl font-extrabold mb-6 tracking-tight">${job.name}</h4>
+                                    <div class="space-y-4">
+                                        <div class="flex justify-between items-center p-3 bg-zinc-50 rounded-xl">
+                                            <span class="text-xs font-bold uppercase tracking-widest text-zinc-400">Hourly Rate</span>
+                                            <span class="font-black text-zinc-900">NTD ${job.hourly_rate}</span>
+                                        </div>
+                                        <div class="flex justify-between items-center p-3 bg-zinc-50 rounded-xl">
+                                            <span class="text-xs font-bold uppercase tracking-widest text-zinc-400">Daily Hours</span>
+                                            <span class="font-black text-zinc-900">${job.hours_per_day}h</span>
+                                        </div>
+                                    </div>
+                                    <div class="mt-6 pt-6 border-t border-zinc-100 flex justify-between items-center">
+                                        <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Est. Daily</span>
+                                        <span class="text-lg font-black text-zinc-900">NTD ${(job.hourly_rate * job.hours_per_day).toLocaleString()}</span>
+                                    </div>
+                                    <div class="mt-4 pt-4 border-t border-zinc-100 flex justify-between items-center">
+                                        <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Total Money</span>
+                                        <span class="text-lg font-black text-emerald-600">NTD ${totalEarned.toLocaleString()}</span>
+                                    </div>
+                                    <div class="mt-2 flex justify-between items-center">
+                                        <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">This Month</span>
+                                        <span class="text-sm font-black text-zinc-700">NTD ${totalEarnedMonth.toLocaleString()}</span>
                                     </div>
                                 </div>
-                                <h4 class="text-2xl font-extrabold mb-6 tracking-tight">${job.name}</h4>
-                                <div class="space-y-4">
-                                    <div class="flex justify-between items-center p-3 bg-zinc-50 rounded-xl">
-                                        <span class="text-xs font-bold uppercase tracking-widest text-zinc-400">Hourly Rate</span>
-                                        <span class="font-black text-zinc-900">NTD ${job.hourly_rate}</span>
-                                    </div>
-                                    <div class="flex justify-between items-center p-3 bg-zinc-50 rounded-xl">
-                                        <span class="text-xs font-bold uppercase tracking-widest text-zinc-400">Daily Hours</span>
-                                        <span class="font-black text-zinc-900">${job.hours_per_day}h</span>
-                                    </div>
-                                </div>
-                                <div class="mt-6 pt-6 border-t border-zinc-100 flex justify-between items-center">
-                                    <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Est. Daily</span>
-                                    <span class="text-lg font-black text-zinc-900">NTD ${(job.hourly_rate * job.hours_per_day).toLocaleString()}</span>
-                                </div>
-                            </div>
-                        `).join('')}
+                            `;
+                        }).join('')}
                     </div>
                 </div>
                 <div id="modal-container"></div>
@@ -1137,7 +1157,7 @@
                             </div>
                             <div>
                                 <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Date</label>
-                                <input type="date" name="date" id="dateInput" value="${prefilledDate || new Date().toISOString().slice(0, 10)}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required onchange="window.updateDateColor(this)">
+                                <input type="date" name="date" id="dateInput" value="${prefilledDate || localYMD()}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required onchange="window.updateDateColor(this)">
                             </div>
                             <div>
                                 <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Amount (NTD)</label>
@@ -1405,7 +1425,7 @@
                         <form id="setTargetForm" class="space-y-6">
                             <div>
                                 <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Month</label>
-                                <input type="month" name="month" value="${new Date().toISOString().slice(0, 7)}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
+                                <input type="month" name="month" value="${localYM()}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
                             </div>
                             <div>
                                 <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Target Amount (NTD)</label>
@@ -1434,19 +1454,24 @@
         };
 
         function renderSummary(container) {
-            const months = [...new Set(state.income.map(i => i.date.slice(0, 7)))].sort().reverse();
-            const currentMonth = months[0] || new Date().toISOString().slice(0, 7);
-            
+            const currentMonth = state.selectedMonth;
+            const [summaryYear, summaryMonth] = currentMonth.split('-').map(Number);
+            const summaryMonthName = new Date(summaryYear, summaryMonth - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+            const summaryTotal = state.income
+                .filter(i => i.date.startsWith(currentMonth))
+                .reduce((sum, i) => sum + i.amount, 0);
+
             container.innerHTML = `
                 <div class="animate-slide space-y-6 md:space-y-8">
                     <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                         <div>
                             <h2 class="text-2xl md:text-3xl font-extrabold tracking-tight">Monthly Summary</h2>
-                            <p class="text-zinc-500 font-medium text-sm">Deep dive into your performance metrics.</p>
+                            <p class="text-zinc-500 font-medium text-sm mt-1">${summaryMonthName} • Total Income: NTD ${summaryTotal.toLocaleString()}</p>
                         </div>
-                        <div class="flex gap-2 bg-zinc-100 p-1 rounded-2xl border border-black/5 self-start sm:self-auto">
-                            <button class="px-4 md:px-6 py-2 bg-white shadow-sm rounded-xl text-[10px] md:text-xs font-bold text-zinc-900">Monthly</button>
-                            <button class="px-4 md:px-6 py-2 rounded-xl text-[10px] md:text-xs font-bold text-zinc-400 hover:text-zinc-600">Yearly</button>
+                        <div class="flex items-center gap-2 bg-zinc-100 p-1 rounded-2xl border border-black/5 self-start sm:self-auto">
+                            <button onclick="window.changeMonth(-1)" class="w-8 h-8 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+                            <button onclick="window.changeMonth(0)" class="px-4 py-2 bg-white shadow-sm rounded-xl text-[10px] md:text-xs font-bold text-zinc-900">Current Month</button>
+                            <button onclick="window.changeMonth(1)" class="w-8 h-8 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
                         </div>
                     </div>
 
@@ -2033,7 +2058,7 @@
             // Weekly spend last 7 days
             const last7 = [...Array(7)].map((_, i) => {
                 const d = new Date(); d.setDate(d.getDate() - i);
-                return d.toISOString().slice(0, 10);
+                return localYMD(d);
             }).reverse();
             const weeklySpend = last7.map(date =>
                 state.expenses.filter(e => e.date === date).reduce((s, e) => s + e.amount, 0)
@@ -2296,7 +2321,7 @@
                                 </div>
                                 <div>
                                     <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Date</label>
-                                    <input type="date" name="date" value="${expense ? expense.date : new Date().toISOString().slice(0,10)}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
+                                    <input type="date" name="date" value="${expense ? expense.date : localYMD()}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
                                 </div>
                             </div>
                             <div>
