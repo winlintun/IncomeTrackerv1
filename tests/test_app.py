@@ -4,18 +4,25 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+TEST_DB = 'sqlite://'
+os.environ['DATABASE_URL'] = TEST_DB
+
 from app import app as flask_app, bcrypt
 from models import db, User, Job, IncomeRecord, Target, Note, Expense
 
 
 @pytest.fixture
 def app():
+    with flask_app.app_context():
+        url = str(db.engine.url)
+        if 'postgresql' in url or url != TEST_DB:
+            raise RuntimeError(f'Refusing to run tests against non-test database: {url}')
     flask_app.config['TESTING'] = True
-    flask_app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
     flask_app.config['WTF_CSRF_ENABLED'] = False
     flask_app.config['SECRET_KEY'] = 'test-secret'
-    
+
     with flask_app.app_context():
+        db.drop_all()
         db.create_all()
         yield flask_app
         db.session.remove()
@@ -62,7 +69,190 @@ def sample_job(app, auth_client):
     return response.get_json()
 
 
+class TestAuthHardening:
+    def test_register_missing_fields_400(self, client):
+        assert client.post('/api/auth/register', json={}).status_code == 400
+        assert client.post('/api/auth/register', json={'username': 'x'}).status_code == 400
+
+    def test_register_nonstring_username_400(self, client):
+        assert client.post('/api/auth/register', json={'username': 123, 'password': 'abc'}).status_code == 400
+        assert client.post('/api/auth/register', json={'username': True, 'password': 'abc'}).status_code == 400
+        assert client.post('/api/auth/register', json={'username': ['a'], 'password': 'abc'}).status_code == 400
+
+    def test_login_nonstring_username_401(self, client):
+        assert client.post('/api/auth/login', json={'username': 123, 'password': 'abc'}).status_code == 401
+        assert client.post('/api/auth/login', json={'username': {'u': 1}, 'password': 'abc'}).status_code == 401
+
+    def test_login_missing_fields_401(self, client):
+        response = client.post('/api/auth/login', json={})
+        assert response.status_code == 401
+        assert response.get_json()['error'] == 'Invalid credentials'
+
+    def test_register_long_password_rejected(self, client):
+        response = client.post('/api/auth/register', json={'username': 'toolong', 'password': 'a' * 100})
+        assert response.status_code == 400
+
+    def test_register_short_password_rejected(self, client):
+        response = client.post('/api/auth/register', json={'username': 'shortpass', 'password': 'abc1'})
+        assert response.status_code == 400
+        assert '6 to 72 bytes' in response.get_json()['error']
+
+    def test_login_long_password_401_not_500(self, client):
+        with flask_app.app_context():
+            hashed = bcrypt.generate_password_hash('normalpass').decode('utf-8')
+            db.session.add(User(username='short', password_hash=hashed))
+            db.session.commit()
+        response = client.post('/api/auth/login', json={'username': 'short', 'password': 'a' * 100})
+        assert response.status_code == 401
+
+    def test_unauthenticated_api_returns_401_json(self, client):
+        response = client.get('/api/jobs')
+        assert response.status_code == 401
+        assert response.get_json()['error'] == 'Authentication required'
+
+    def test_unauthenticated_page_redirects_home(self, client):
+        response = client.get('/notes')
+        assert response.status_code == 302
+        assert response.headers['Location'].endswith('/')
+
+    def test_db_health_endpoint(self, client):
+        response = client.get('/api/health/db')
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body['status'] == 'ok'
+        assert body['dialect'] == 'sqlite'
+
+    def test_reset_password_long_password_400(self, client):
+        response = client.post('/api/auth/reset-password', json={
+            'username': 'anyone', 'token': 'tok', 'new_password': 'a' * 100})
+        assert response.status_code == 400
+
+    def test_forgot_password_malformed_bodies_400(self, client):
+        assert client.post('/api/auth/forgot-password', json=[1, 2]).status_code == 400
+        assert client.post('/api/auth/forgot-password', json={'username': 123}).status_code == 400
+
+    def test_reset_password_malformed_bodies_400(self, client):
+        assert client.post('/api/auth/reset-password', json=[1, 2]).status_code == 400
+        assert client.post('/api/auth/reset-password', json={'username': 'u', 'token': 123, 'new_password': 'abcdef'}).status_code == 400
+
+    def test_admin_delete_user_with_notes_and_tokens(self, admin_client):
+        with flask_app.app_context():
+            hashed = bcrypt.generate_password_hash('pass1234').decode('utf-8')
+            user = User(username='hasnotes', password_hash=hashed)
+            db.session.add(user)
+            db.session.commit()
+            uid = user.id
+            db.session.add(Note(user_id=uid, title='t', content='c'))
+            from models import PasswordResetToken
+            from datetime import datetime
+            db.session.add(PasswordResetToken(user_id=uid, token='tok123', expires_at=datetime(2030, 1, 1)))
+            db.session.commit()
+
+        response = admin_client.delete(f'/api/admin/users/{uid}')
+        assert response.status_code == 200
+        with flask_app.app_context():
+            from models import PasswordResetToken
+            assert db.session.get(User, uid) is None
+            assert PasswordResetToken.query.count() == 0
+            assert Note.query.count() == 0
+
+
 class TestAuth:
+    def test_forgot_password_unknown_user(self, client):
+        response = client.post('/api/auth/forgot-password', json={'username': 'ghost'})
+        assert response.status_code == 200
+        body = response.get_json()
+        assert 'reset_token' not in body
+        with flask_app.app_context():
+            from models import PasswordResetToken
+            assert PasswordResetToken.query.count() == 0
+
+    def test_forgot_password_creates_token_and_resets(self, client):
+        client.post('/api/auth/register', json={'username': 'alice', 'password': 'oldpass'})
+
+        response = client.post('/api/auth/forgot-password', json={'username': 'alice'})
+        assert response.status_code == 200
+        assert 'reset_token' not in response.get_json()
+
+        with flask_app.app_context():
+            from models import PasswordResetToken
+            reset = PasswordResetToken.query.first()
+            token = reset.token
+
+        response = client.post('/api/auth/reset-password', json={
+            'username': 'alice', 'token': token, 'new_password': 'newpass123'
+        })
+        assert response.status_code == 200
+
+        login = client.post('/api/auth/login', json={'username': 'alice', 'password': 'newpass123'})
+        assert login.status_code == 200
+        assert client.post('/api/auth/login', json={'username': 'alice', 'password': 'oldpass'}).status_code == 401
+
+    def test_reset_password_invalid_token(self, client):
+        client.post('/api/auth/register', json={'username': 'alice', 'password': 'pass123'})
+        response = client.post('/api/auth/reset-password', json={
+            'username': 'alice', 'token': 'bogus', 'new_password': 'newpass123'
+        })
+        assert response.status_code == 400
+
+    def test_reset_password_token_reuse_rejected(self, client):
+        client.post('/api/auth/register', json={'username': 'alice', 'password': 'pass123'})
+        client.post('/api/auth/forgot-password', json={'username': 'alice'})
+        with flask_app.app_context():
+            from models import PasswordResetToken
+            token = PasswordResetToken.query.first().token
+        client.post('/api/auth/reset-password', json={'username': 'alice', 'token': token, 'new_password': 'newpass1'})
+        response = client.post('/api/auth/reset-password', json={'username': 'alice', 'token': token, 'new_password': 'newpass2'})
+        assert response.status_code == 400
+
+    def test_reset_password_short_password_rejected(self, client):
+        client.post('/api/auth/register', json={'username': 'alice', 'password': 'pass123'})
+        client.post('/api/auth/forgot-password', json={'username': 'alice'})
+        with flask_app.app_context():
+            from models import PasswordResetToken
+            token = PasswordResetToken.query.first().token
+        response = client.post('/api/auth/reset-password', json={'username': 'alice', 'token': token, 'new_password': 'abc'})
+        assert response.status_code == 400
+
+    def test_reset_password_username_mismatch_rejected(self, client):
+        client.post('/api/auth/register', json={'username': 'alice', 'password': 'pass123'})
+        client.post('/api/auth/forgot-password', json={'username': 'alice'})
+        with flask_app.app_context():
+            from models import PasswordResetToken
+            token = PasswordResetToken.query.first().token
+        response = client.post('/api/auth/reset-password', json={'username': 'eve', 'token': token, 'new_password': 'hack123'})
+        assert response.status_code == 400
+
+    def test_forgot_password_admin_gets_token_in_response(self, admin_client):
+        client = admin_client
+        with flask_app.app_context():
+            hashed = bcrypt.generate_password_hash('userpass').decode('utf-8')
+            user = User(username='bob', password_hash=hashed, role='user')
+            db.session.add(user)
+            db.session.commit()
+
+        response = client.post('/api/auth/forgot-password', json={'username': 'bob'})
+        assert response.status_code == 200
+        assert response.get_json()['reset_token']
+
+    def test_forgot_password_non_admin_gets_no_token(self, auth_client):
+        response = auth_client.post('/api/auth/forgot-password', json={'username': 'testuser'})
+        assert response.status_code == 200
+        assert 'reset_token' not in response.get_json()
+
+    def test_forgot_password_expires(self, client):
+        from datetime import datetime
+        client.post('/api/auth/register', json={'username': 'alice', 'password': 'pass123'})
+        client.post('/api/auth/forgot-password', json={'username': 'alice'})
+        with flask_app.app_context():
+            from models import PasswordResetToken
+            reset = PasswordResetToken.query.first()
+            reset.expires_at = datetime(2020, 1, 1)
+            db.session.commit()
+            token = reset.token
+        response = client.post('/api/auth/reset-password', json={'username': 'alice', 'token': token, 'new_password': 'newpass1'})
+        assert response.status_code == 400
+
     def test_register_success(self, client):
         response = client.post('/api/auth/register', json={
             'username': 'newuser',
@@ -72,10 +262,10 @@ class TestAuth:
         assert response.get_json()['message'] == 'User created successfully'
     
     def test_register_duplicate_username(self, client):
-        client.post('/api/auth/register', json={'username': 'testuser', 'password': 'pass'})
+        client.post('/api/auth/register', json={'username': 'testuser', 'password': 'pass1234'})
         response = client.post('/api/auth/register', json={
             'username': 'testuser',
-            'password': 'pass2'
+            'password': 'pass1234'
         })
         assert response.status_code == 400
         assert 'Username already exists' in response.get_json()['error']
@@ -83,7 +273,7 @@ class TestAuth:
     def test_first_user_is_admin(self, client):
         response = client.post('/api/auth/register', json={
             'username': 'first',
-            'password': 'pass'
+            'password': 'pass1234'
         })
         assert response.status_code == 201
         with flask_app.app_context():
@@ -91,17 +281,55 @@ class TestAuth:
             assert user.role == 'admin'
     
     def test_login_success(self, client):
-        client.post('/api/auth/register', json={'username': 'user1', 'password': 'pass'})
+        client.post('/api/auth/register', json={'username': 'user1', 'password': 'pass1234'})
         response = client.post('/api/auth/login', json={
             'username': 'user1',
-            'password': 'pass'
+            'password': 'pass1234'
         })
         assert response.status_code == 200
         data = response.get_json()
         assert data['username'] == 'user1'
+
+    def test_login_username_is_case_insensitive(self, client):
+        client.post('/api/auth/register', json={'username': 'CaseUser', 'password': 'pass1234'})
+        response = client.post('/api/auth/login', json={'username': 'caseuser', 'password': 'pass1234'})
+        assert response.status_code == 200
+        assert response.get_json()['username'] == 'CaseUser'
+
+    def test_login_username_unicode_case_insensitive(self, client):
+        client.post('/api/auth/register', json={'username': 'Änne', 'password': 'pass1234'})
+        for username in ('Änne', 'änne', 'ÄNNE'):
+            response = client.post('/api/auth/login', json={'username': username, 'password': 'pass1234'})
+            assert response.status_code == 200
+            assert response.get_json()['username'] == 'Änne'
+
+    def test_forgot_and_reset_password_username_is_case_insensitive(self, client):
+        client.post('/api/auth/register', json={'username': 'CaseUser', 'password': 'pass1234'})
+        client.post('/api/auth/forgot-password', json={'username': 'caseuser'})
+        with flask_app.app_context():
+            from models import PasswordResetToken
+            token = PasswordResetToken.query.first()
+            assert token is not None
+            token = token.token
+        response = client.post('/api/auth/reset-password', json={
+            'username': 'CASEUSER', 'token': token, 'new_password': 'newpass123'})
+        assert response.status_code == 200
+        assert client.post('/api/auth/login', json={
+            'username': 'CaseUser', 'password': 'newpass123'}).status_code == 200
+
+    def test_login_password_is_case_sensitive(self, client):
+        client.post('/api/auth/register', json={'username': 'casepass', 'password': 'Pass1234'})
+        response = client.post('/api/auth/login', json={'username': 'casepass', 'password': 'pass1234'})
+        assert response.status_code == 401
+
+    def test_register_rejects_case_variant_duplicate(self, client):
+        client.post('/api/auth/register', json={'username': 'CaseUser', 'password': 'pass1234'})
+        response = client.post('/api/auth/register', json={'username': 'caseuser', 'password': 'pass1234'})
+        assert response.status_code == 400
+        assert 'Username already exists' in response.get_json()['error']
     
     def test_login_invalid_credentials(self, client):
-        client.post('/api/auth/register', json={'username': 'user2', 'password': 'pass'})
+        client.post('/api/auth/register', json={'username': 'user2', 'password': 'pass1234'})
         response = client.post('/api/auth/login', json={
             'username': 'user2',
             'password': 'wrongpass'
@@ -168,8 +396,8 @@ class TestJobs:
         assert response.get_json()['message'] == 'Job deleted'
     
     def test_jobs_isolated_by_user(self, client):
-        client.post('/api/auth/register', json={'username': 'user1', 'password': 'pass'})
-        client.post('/api/auth/login', json={'username': 'user1', 'password': 'pass'})
+        client.post('/api/auth/register', json={'username': 'user1', 'password': 'pass1234'})
+        client.post('/api/auth/login', json={'username': 'user1', 'password': 'pass1234'})
         client.post('/api/jobs', json={
             'name': 'User1 Job',
             'hourly_rate': 100,
@@ -177,8 +405,8 @@ class TestJobs:
             'color': '#18181b'
         })
         
-        client.post('/api/auth/register', json={'username': 'user2', 'password': 'pass'})
-        client.post('/api/auth/login', json={'username': 'user2', 'password': 'pass'})
+        client.post('/api/auth/register', json={'username': 'user2', 'password': 'pass1234'})
+        client.post('/api/auth/login', json={'username': 'user2', 'password': 'pass1234'})
         response = client.get('/api/jobs')
         jobs = response.get_json()
         assert all(j['name'] != 'User1 Job' for j in jobs)
@@ -343,12 +571,12 @@ class TestNotes:
         assert response.status_code == 200
     
     def test_notes_isolated_by_user(self, client):
-        client.post('/api/auth/register', json={'username': 'user1', 'password': 'pass'})
-        client.post('/api/auth/login', json={'username': 'user1', 'password': 'pass'})
+        client.post('/api/auth/register', json={'username': 'user1', 'password': 'pass1234'})
+        client.post('/api/auth/login', json={'username': 'user1', 'password': 'pass1234'})
         client.post('/api/notes', json={'title': 'User1 Private Note', 'content': 'Secret'})
         
-        client.post('/api/auth/register', json={'username': 'user2', 'password': 'pass'})
-        client.post('/api/auth/login', json={'username': 'user2', 'password': 'pass'})
+        client.post('/api/auth/register', json={'username': 'user2', 'password': 'pass1234'})
+        client.post('/api/auth/login', json={'username': 'user2', 'password': 'pass1234'})
         response = client.get('/api/notes')
         notes = response.get_json()
         assert all(n['title'] != 'User1 Private Note' for n in notes)
@@ -511,8 +739,8 @@ class TestSecurity:
             'color': '#18181b'
         })
         
-        client.post('/api/auth/register', json={'username': 'other', 'password': 'pass'})
-        client.post('/api/auth/login', json={'username': 'other', 'password': 'pass'})
+        client.post('/api/auth/register', json={'username': 'other', 'password': 'pass1234'})
+        client.post('/api/auth/login', json={'username': 'other', 'password': 'pass1234'})
         response = client.get('/api/jobs')
         jobs = response.get_json()
         assert all(j['name'] != 'Private Job' for j in jobs)

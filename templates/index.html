@@ -9,6 +9,9 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+        try { if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}
+    </script>
     <style>
         :root {
             --primary: #18181b;
@@ -49,6 +52,50 @@
             to { opacity: 1; transform: translateY(0); }
         }
         .animate-slide { animation: slideIn 0.4s ease-out forwards; }
+
+        /* Dark theme: remap utility classes rendered by the SPA */
+        html.dark {
+            color-scheme: dark;
+        }
+        html.dark body { background-color: #0b0b0e; }
+        html.dark .bg-white { background-color: #17171b; }
+        html.dark .bg-zinc-50 { background-color: #1e1e23; }
+        html.dark .bg-zinc-50\/50 { background-color: rgba(30, 30, 35, 0.5); }
+        html.dark .bg-zinc-50\/30 { background-color: rgba(30, 30, 35, 0.3); }
+        html.dark .bg-zinc-100 { background-color: #26262b; }
+        html.dark .bg-zinc-200 { background-color: #2f2f35; }
+        html.dark .bg-zinc-800 { background-color: #55555e; }
+        html.dark .bg-zinc-900 { background-color: #27272c; }
+        html.dark .text-zinc-900 { color: #fafafa; }
+        html.dark .text-zinc-800 { color: #f4f4f5; }
+        html.dark .text-zinc-700 { color: #d4d4d8; }
+        html.dark .text-zinc-600 { color: #c6c6cc; }
+        html.dark .text-zinc-500 { color: #9b9ba3; }
+        html.dark .text-zinc-400 { color: #7c7c85; }
+        html.dark .text-zinc-300 { color: #55555e; }
+        html.dark .border-black\/5 { border-color: rgba(255, 255, 255, 0.06); }
+        html.dark .border-zinc-100 { border-color: #26262b; }
+        html.dark .border-zinc-200 { border-color: #2f2f35; }
+        html.dark .border-zinc-400 { border-color: #3f3f46; }
+        html.dark .hover\:border-zinc-400:hover { border-color: #3f3f46; }
+        html.dark .hover\:bg-zinc-50:hover { background-color: #26262b; }
+        html.dark .hover\:bg-zinc-100:hover { background-color: #2f2f35; }
+        html.dark .hover\:bg-zinc-200:hover { background-color: #3f3f46; }
+        html.dark .hover\:bg-zinc-800:hover { background-color: #303036; }
+        html.dark .hover\:bg-zinc-50\/50:hover { background-color: rgba(38, 38, 43, 0.5); }
+        html.dark .hover\:bg-zinc-50\/30:hover { background-color: rgba(38, 38, 43, 0.3); }
+        html.dark .hover\:text-zinc-900:hover { color: #e4e4e7; }
+        html.dark .hover\:text-zinc-600:hover { color: #d4d4d8; }
+        html.dark .hover\:bg-red-50:hover { background-color: rgba(239, 68, 68, 0.12); }
+        html.dark .bg-red-50 { background-color: rgba(239, 68, 68, 0.12); }
+        html.dark .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.12); }
+        html.dark .border-red-100 { border-color: rgba(239, 68, 68, 0.25); }
+        html.dark .border-emerald-100 { border-color: rgba(16, 185, 129, 0.25); }
+        html.dark .card-shadow { box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 2px 10px -2px rgba(0, 0, 0, 0.3); }
+        html.dark .glass { background: rgba(23, 23, 27, 0.7); border-color: rgba(255, 255, 255, 0.08); }
+        html.dark .btn-primary { background: #fafafa; color: #18181b; }
+        html.dark .input-field { border-color: #2f2f35; }
+        html.dark .input-field:focus { border-color: #fafafa; box-shadow: 0 0 0 4px rgba(250, 250, 250, 0.08); }
     </style>
 </head>
 <body class="bg-zinc-50 text-zinc-900 min-h-screen">
@@ -89,6 +136,10 @@
         const pad2 = (n) => String(n).padStart(2, '0');
         const localYM = (date = new Date()) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
         const localYMD = (date = new Date()) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+        const isDarkTheme = () => document.documentElement.classList.contains('dark');
+        const chartColors = () => isDarkTheme() ? '#a1a1aa' : '#71717a';
+        const escAttr = (s = '') => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const savedTheme = (() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })();
 
         // Basic SPA Router and State Management
         let state = {
@@ -101,7 +152,9 @@
             authView: 'login',
             loading: true,
             mobileMenuOpen: false,
-            selectedMonth: localYM()
+            selectedMonth: localYM(),
+            theme: (savedTheme === 'dark' ? 'dark' : 'light'),
+            forgotUsername: null
         };
 
         function showToast(message, type = 'success') {
@@ -150,6 +203,8 @@
 
             if (!state.user) {
                 if (state.authView === 'login') renderAuth();
+                else if (state.authView === 'forgot') renderForgot();
+                else if (state.authView === 'reset') renderReset();
                 else renderRegister();
                 return;
             }
@@ -175,7 +230,7 @@
                             ${error ? `
                                 <div class="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 animate-pulse">
                                     <i data-lucide="alert-circle" class="w-5 h-5"></i>
-                                    <p class="text-sm font-bold">${error}</p>
+                                    <p class="text-sm font-bold">${escAttr(error)}</p>
                                 </div>
                             ` : ''}
 
@@ -185,7 +240,10 @@
                                     <input type="text" id="username" name="username" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" placeholder="Enter your username" required>
                                 </div>
                                 <div>
-                                    <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Password</label>
+                                    <div class="flex justify-between items-center mb-2">
+                                        <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 ml-1">Password</label>
+                                        <a href="#" id="showForgot" class="text-[11px] font-bold text-zinc-400 hover:text-zinc-900 transition-colors">Forgot password?</a>
+                                    </div>
                                     <input type="password" id="password" name="password" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" placeholder="••••••••" required>
                                 </div>
                                 <button type="submit" class="w-full py-5 bg-zinc-900 text-white rounded-2xl font-bold hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-200 flex items-center justify-center gap-2 group">
@@ -211,21 +269,35 @@
                 render();
             };
 
+            document.getElementById('showForgot').onclick = (e) => {
+                e.preventDefault();
+                state.authView = 'forgot';
+                render();
+            };
+
             document.getElementById('loginForm').onsubmit = async (e) => {
                 e.preventDefault();
                 const username = e.target.username.value;
                 const password = e.target.password.value;
-                const res = await fetch('/api/auth/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
+                let res;
+                try {
+                    res = await fetch('/api/auth/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, password })
+                    });
+                } catch (err) {
+                    renderAuth('Cannot reach the server. Check your connection and try again.');
+                    return;
+                }
                 if (res.ok) {
                     state.user = await res.json();
                     await fetchData();
                     render();
-                } else {
+                } else if (res.status === 401) {
                     renderAuth('Invalid credentials. Please re-enter your password.');
+                } else {
+                    renderAuth(`Login failed (HTTP ${res.status}). Server error - please try again.`);
                 }
             };
         }
@@ -248,7 +320,7 @@
                             ${error ? `
                                 <div class="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 animate-pulse">
                                     <i data-lucide="alert-circle" class="w-5 h-5"></i>
-                                    <p class="text-sm font-bold">${error}</p>
+                                    <p class="text-sm font-bold">${escAttr(error)}</p>
                                 </div>
                             ` : ''}
 
@@ -288,18 +360,186 @@
                 e.preventDefault();
                 const username = e.target.username.value;
                 const password = e.target.password.value;
-                const res = await fetch('/api/auth/register', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
+                let res;
+                try {
+                    res = await fetch('/api/auth/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, password })
+                    });
+                } catch (err) {
+                    renderRegister('Cannot reach the server. Check your connection and try again.');
+                    return;
+                }
                 if (res.ok) {
                     alert('Registration successful! Please login.');
                     state.authView = 'login';
                     render();
                 } else {
-                    const data = await res.json();
-                    renderRegister(data.error || 'Registration failed. Please try again.');
+                    let message = `Registration failed (HTTP ${res.status}). Please try again.`;
+                    try {
+                        const data = await res.json();
+                        if (data && data.error) message = data.error;
+                    } catch (err) {}
+                    renderRegister(message);
+                }
+            };
+        }
+
+        function renderForgot(error = null, notice = null, prefilledToken = null) {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center p-4">
+                    <div class="max-w-md w-full animate-slide">
+                        <div class="bg-white p-10 rounded-[2.5rem] card-shadow border border-black/5 relative overflow-hidden">
+                            <div class="absolute top-0 left-0 w-full h-2 bg-amber-400"></div>
+                            <div class="mb-10 text-center">
+                                <div class="w-16 h-16 bg-amber-400 rounded-2xl flex items-center justify-center text-white mx-auto mb-6 shadow-lg rotate-3">
+                                    <i data-lucide="key-round" class="w-8 h-8"></i>
+                                </div>
+                                <h1 class="text-4xl font-extrabold tracking-tight mb-2">Forgot Password</h1>
+                                <p class="text-zinc-500 font-medium">Request a reset code for your account.</p>
+                            </div>
+
+                            ${error ? `
+                                <div class="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 animate-pulse">
+                                    <i data-lucide="alert-circle" class="w-5 h-5"></i>
+                                    <p class="text-sm font-bold">${escAttr(error)}</p>
+                                </div>
+                            ` : ''}
+                            ${notice ? `
+                                <div class="mb-6 p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-start gap-3 text-emerald-600">
+                                    <i data-lucide="check-circle-2" class="w-5 h-5 flex-shrink-0"></i>
+                                    <p class="text-sm font-bold">${escAttr(notice)}${prefilledToken ? '<br><span class="font-mono font-black select-all">' + escAttr(prefilledToken) + '</span>' : ''}</p>
+                                </div>
+                            ` : ''}
+                            <form id="forgotForm" class="space-y-5">
+                                <div>
+                                    <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Username</label>
+                                    <input type="text" name="username" value="${escAttr(state.forgotUsername || '')}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" placeholder="Enter your username" required>
+                                </div>
+                                <button type="submit" class="w-full py-5 bg-zinc-900 text-white rounded-2xl font-bold hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-200 flex items-center justify-center gap-2 group">
+                                    <span>Get Reset Code</span>
+                                    <i data-lucide="arrow-right" class="w-5 h-5 group-hover:translate-x-1 transition-transform"></i>
+                                </button>
+                            </form>
+
+                            <div class="mt-4">
+                                <button onclick="window.goToReset()" class="w-full py-4 bg-emerald-500 text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100">I have my code — Reset now</button>
+                            </div>
+
+                            <div class="mt-10 pt-8 border-t border-zinc-100 text-center">
+                                <p class="text-sm text-zinc-500 font-medium">
+                                    <a href="#" id="backToLogin" class="text-zinc-900 font-bold hover:underline underline-offset-4">Back to sign in</a>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+
+            document.getElementById('backToLogin').onclick = (e) => {
+                e.preventDefault();
+                state.authView = 'login';
+                render();
+            };
+
+            document.getElementById('forgotForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const username = e.target.username.value.trim();
+                const res = await fetch('/api/auth/forgot-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    state.forgotUsername = username;
+                    const followUp = data.reset_token ? ' Then press "Reset now".' : ' Once you have the code, press "I have my code — Reset now" below.';
+                    renderForgot(null, data.message + followUp, data.reset_token || null);
+                } else {
+                    renderForgot(data.error || 'Something went wrong. Please try again.');
+                }
+            };
+        }
+
+        function renderReset(error = null) {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center p-4">
+                    <div class="max-w-md w-full animate-slide">
+                        <div class="bg-white p-10 rounded-[2.5rem] card-shadow border border-black/5 relative overflow-hidden">
+                            <div class="absolute top-0 left-0 w-full h-2 bg-emerald-500"></div>
+                            <div class="mb-10 text-center">
+                                <div class="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center text-white mx-auto mb-6 shadow-lg -rotate-3">
+                                    <i data-lucide="lock-keyhole" class="w-8 h-8"></i>
+                                </div>
+                                <h1 class="text-4xl font-extrabold tracking-tight mb-2">Reset Password</h1>
+                                <p class="text-zinc-500 font-medium">Enter your reset code and a new password.</p>
+                            </div>
+
+                            ${error ? `
+                                <div class="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 animate-pulse">
+                                    <i data-lucide="alert-circle" class="w-5 h-5"></i>
+                                    <p class="text-sm font-bold">${escAttr(error)}</p>
+                                </div>
+                            ` : ''}
+
+                            <form id="resetForm" class="space-y-5">
+                                <div>
+                                    <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Username</label>
+                                    <input type="text" name="username" value="${escAttr(state.forgotUsername || '')}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" placeholder="Enter your username" required>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Reset Code</label>
+                                    <input type="text" name="token" class="font-mono w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" placeholder="Paste your reset code" required>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">New Password</label>
+                                    <input type="password" name="new_password" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" placeholder="At least 6 characters" minlength="6" required>
+                                </div>
+                                <button type="submit" class="w-full py-5 bg-zinc-900 text-white rounded-2xl font-bold hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-200 flex items-center justify-center gap-2 group">
+                                    <span>Save New Password</span>
+                                    <i data-lucide="check" class="w-5 h-5 group-hover:scale-110 transition-transform"></i>
+                                </button>
+                            </form>
+
+                            <div class="mt-10 pt-8 border-t border-zinc-100 text-center">
+                                <p class="text-sm text-zinc-500 font-medium">
+                                    <a href="#" id="backToLogin" class="text-zinc-900 font-bold hover:underline underline-offset-4">Back to sign in</a>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+
+            document.getElementById('backToLogin').onclick = (e) => {
+                e.preventDefault();
+                state.authView = 'login';
+                render();
+            };
+
+            document.getElementById('resetForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const username = e.target.username.value.trim();
+                const token = e.target.token.value.trim();
+                const new_password = e.target.new_password.value;
+                const res = await fetch('/api/auth/reset-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, token, new_password })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    state.forgotUsername = null;
+                    state.authView = 'login';
+                    render();
+                    showToast('Password updated! You can now sign in.');
+                } else {
+                    renderReset(data.error || 'Something went wrong. Please try again.');
                 }
             };
         }
@@ -329,6 +569,9 @@
                     </div>
 
                     <div class="flex items-center gap-2 md:gap-4">
+                        <button onclick="window.toggleTheme()" title="Toggle light/dark theme" class="w-10 h-10 rounded-xl border border-black/5 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
+                            <i data-lucide="${state.theme === 'dark' ? 'sun' : 'moon'}"></i>
+                        </button>
                         <div class="text-right hidden sm:block">
                             <p class="text-sm font-bold text-zinc-900">${state.user.username}</p>
                             <p class="text-[10px] text-zinc-400 uppercase font-bold tracking-widest">${state.user.role}</p>
@@ -469,6 +712,18 @@
                     showToast('Failed to log income', 'error');
                 }
             };
+        };
+
+        window.goToReset = () => {
+            state.authView = 'reset';
+            render();
+        };
+
+        window.toggleTheme = () => {
+            state.theme = state.theme === 'dark' ? 'light' : 'dark';
+            try { localStorage.setItem('theme', state.theme); } catch (e) {}
+            document.documentElement.classList.toggle('dark', state.theme === 'dark');
+            render();
         };
 
         window.logout = async () => {
@@ -658,14 +913,14 @@
                     datasets: [{
                         label: 'Earnings',
                         data: weeklyData,
-                        borderColor: '#18181b',
-                        backgroundColor: 'rgba(24, 24, 27, 0.05)',
+                        borderColor: isDarkTheme() ? '#e4e4e7' : '#18181b',
+                        backgroundColor: isDarkTheme() ? 'rgba(228, 228, 231, 0.08)' : 'rgba(24, 24, 27, 0.05)',
                         fill: true,
                         tension: 0.4,
                         borderWidth: 4,
                         pointRadius: 6,
-                        pointBackgroundColor: '#fff',
-                        pointBorderColor: '#18181b',
+                        pointBackgroundColor: isDarkTheme() ? '#17171b' : '#fff',
+                        pointBorderColor: isDarkTheme() ? '#e4e4e7' : '#18181b',
                         pointBorderWidth: 3
                     }]
                 },
@@ -674,8 +929,8 @@
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
-                        y: { beginAtZero: true, grid: { display: false }, ticks: { font: { weight: 'bold' } } },
-                        x: { grid: { display: false }, ticks: { font: { weight: 'bold' } } }
+                        y: { beginAtZero: true, grid: { display: false }, ticks: { font: { weight: 'bold' }, color: chartColors() } },
+                        x: { grid: { display: false }, ticks: { font: { weight: 'bold' }, color: chartColors() } }
                     }
                 }
             });
@@ -712,6 +967,7 @@
                             labels: {
                                 padding: 20,
                                 usePointStyle: true,
+                                color: chartColors(),
                                 font: { weight: 'bold', size: 11 }
                             }
                         }
@@ -982,6 +1238,23 @@
             var panel = document.getElementById('work-pace-panel');
             if (!panel) return;
 
+            var T = document.documentElement.classList.contains('dark');
+            var C = T ? {
+                cardBg: '#1f1f24', cardBorder: 'rgba(255,255,255,.06)', line: '#2b2b31',
+                title: '#fafafa', soft: '#7c7c85', accentTile: '#fafafa',
+                accentTileIcon: '#18181b', pillOn: '#fafafa', pillOnText: '#18181b',
+                pillOffBg: '#26262b', pillOffText: '#7c7c85', pillOffBorder: '#2f2f35',
+                bar: '#fafafa', track: '#2f2f35', dotOn: '#fafafa', dotOnBorder: '#fafafa',
+                dotOff: '#33333a', dotOffBorder: '#3f3f46', danger: '#f87171'
+            } : {
+                cardBg: '#fff', cardBorder: 'rgba(0,0,0,.05)', line: '#f4f4f5',
+                title: '#18181b', soft: '#a1a1aa', accentTile: '#18181b',
+                accentTileIcon: '#fff', pillOn: '#18181b', pillOnText: '#fff',
+                pillOffBg: '#f9fafb', pillOffText: '#a1a1aa', pillOffBorder: '#f4f4f5',
+                bar: '#18181b', track: '#f4f4f5', dotOn: '#18181b', dotOnBorder: '#18181b',
+                dotOff: '#f4f4f5', dotOffBorder: '#e4e4e7', danger: '#ef4444'
+            };
+
             var now = new Date();
             var currentMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
             var dayOfMonth = now.getDate();
@@ -1008,7 +1281,7 @@
             for (var d = 1; d <= 7; d++) {
                 var sel = (wdpw === d);
                 pills += '<button type="button" onclick="window.saveWorkDays(' + d + ')" style="'
-                    + (sel ? 'background:#18181b;color:#fff;border-color:#18181b;' : 'background:#f9fafb;color:#a1a1aa;border-color:#f4f4f5;')
+                    + (sel ? 'background:' + C.pillOn + ';color:' + C.pillOnText + ';border-color:' + C.pillOn + ';' : 'background:' + C.pillOffBg + ';color:' + C.pillOffText + ';border-color:' + C.pillOffBorder + ';')
                     + '" class="py-2 px-3 rounded-xl border text-xs font-bold transition-all hover:border-zinc-400 cursor-pointer">' + d + 'd</button>';
             }
 
@@ -1022,8 +1295,8 @@
                 // Estimated completion
                 var compLabel = '—';
                 var compNote  = 'Log income to get an estimate';
-                var compStyle = 'color:#18181b';
-                var noteStyle = 'color:#a1a1aa';
+                var compStyle = 'color:' + C.title;
+                var noteStyle = 'color:' + C.soft;
 
                 if (earned >= targetAmt) {
                     compLabel = 'Done!';
@@ -1043,7 +1316,7 @@
                         if (estDate > endOfMonth) {
                             compNote  = 'Behind pace \u2014 may miss this month';
                             compStyle = 'color:#ef4444';
-                            noteStyle = 'color:#f87171';
+                            noteStyle = 'color:' + C.danger;
                         } else {
                             compNote  = 'Estimated completion this month';
                         }
@@ -1052,51 +1325,51 @@
 
                 // Progress bar
                 var pct = Math.min(100, (earned / targetAmt) * 100).toFixed(1);
-                var barColor = earned >= targetAmt ? '#10b981' : '#18181b';
+                var barColor = earned >= targetAmt ? '#10b981' : C.bar;
 
                 // Dot trail
                 var dots = '';
                 for (var k = 0; k < totalWorkDays; k++) {
-                    dots += '<div style="width:8px;height:8px;border-radius:50%;background:' + (k < doneWorkDays ? '#18181b' : '#f4f4f5') + ';border:1px solid ' + (k < doneWorkDays ? '#18181b' : '#e4e4e7') + '"></div>';
+                    dots += '<div style="width:8px;height:8px;border-radius:50%;background:' + (k < doneWorkDays ? C.dotOn : C.dotOff) + ';border:1px solid ' + (k < doneWorkDays ? C.dotOnBorder : C.dotOffBorder) + '"></div>';
                 }
 
-                statsHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #f4f4f5">'
+                statsHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;border-top:1px solid ' + C.line + '">'
                     // Left: days left
-                    + '<div style="padding:28px 32px;border-right:1px solid #f4f4f5">'
-                    + '<p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:#a1a1aa;margin-bottom:6px">Working days left</p>'
-                    + '<p style="font-size:48px;font-weight:900;color:#18181b;line-height:1">' + leftWorkDays + '</p>'
-                    + '<p style="font-size:11px;color:#a1a1aa;margin-top:6px">' + doneWorkDays + ' done &middot; ' + totalWorkDays + ' total this month</p>'
+                    + '<div style="padding:28px 32px;border-right:1px solid ' + C.line + '">'
+                    + '<p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:' + C.soft + ';margin-bottom:6px">Working days left</p>'
+                    + '<p style="font-size:48px;font-weight:900;color:' + C.title + ';line-height:1">' + leftWorkDays + '</p>'
+                    + '<p style="font-size:11px;color:' + C.soft + ';margin-top:6px">' + doneWorkDays + ' done &middot; ' + totalWorkDays + ' total this month</p>'
                     + '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:12px">' + dots + '</div>'
                     + '</div>'
                     // Right: estimated completion
                     + '<div style="padding:28px 32px">'
-                    + '<p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:#a1a1aa;margin-bottom:6px">Est. completion</p>'
+                    + '<p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:' + C.soft + ';margin-bottom:6px">Est. completion</p>'
                     + '<p style="font-size:48px;font-weight:900;line-height:1;' + compStyle + '">' + compLabel + '</p>'
                     + '<p style="font-size:11px;margin-top:6px;' + noteStyle + '">' + compNote + '</p>'
                     + '<div style="margin-top:16px">'
-                    + '<div style="display:flex;justify-content:space-between;font-size:10px;font-weight:700;color:#a1a1aa;margin-bottom:4px">'
+                    + '<div style="display:flex;justify-content:space-between;font-size:10px;font-weight:700;color:' + C.soft + ';margin-bottom:4px">'
                     + '<span>NTD ' + Math.round(earned).toLocaleString() + '</span><span>/ NTD ' + targetAmt.toLocaleString() + '</span>'
                     + '</div>'
-                    + '<div style="height:6px;background:#f4f4f5;border-radius:999px;overflow:hidden">'
+                    + '<div style="height:6px;background:' + C.track + ';border-radius:999px;overflow:hidden">'
                     + '<div style="height:100%;border-radius:999px;background:' + barColor + ';width:' + pct + '%;transition:width .6s"></div>'
                     + '</div></div>'
                     + '</div>'
                     + '</div>';
             } else {
-                statsHTML = '<div style="padding:20px 32px;color:#a1a1aa;font-size:13px;border-top:1px solid #f4f4f5">'
+                statsHTML = '<div style="padding:20px 32px;color:' + C.soft + ';font-size:13px;border-top:1px solid ' + C.line + '">'
                     + 'Select days per week above to see working days left and estimated completion date.'
                     + '</div>';
             }
 
-            panel.innerHTML = '<div style="background:#fff;border-radius:2.5rem;border:1px solid rgba(0,0,0,.05);box-shadow:0 1px 3px rgba(0,0,0,.04);overflow:hidden;margin-bottom:32px">'
-                + '<div style="padding:24px 32px;border-bottom:1px solid #f4f4f5;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">'
+            panel.innerHTML = '<div style="background:' + C.cardBg + ';border-radius:2.5rem;border:1px solid ' + C.cardBorder + ';box-shadow:0 1px 3px rgba(0,0,0,.08);overflow:hidden;margin-bottom:32px">'
+                + '<div style="padding:24px 32px;border-bottom:1px solid ' + C.line + ';display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">'
                 + '<div style="display:flex;align-items:center;gap:12px">'
-                + '<div style="width:40px;height:40px;background:#18181b;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
-                + '<i data-lucide="calendar-clock" style="width:18px;height:18px;color:#fff"></i>'
+                + '<div style="width:40px;height:40px;background:' + C.accentTile + ';border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+                + '<i data-lucide="calendar-clock" style="width:18px;height:18px;color:' + C.accentTileIcon + '"></i>'
                 + '</div>'
                 + '<div>'
-                + '<p style="font-size:15px;font-weight:800;color:#18181b">Work Schedule</p>'
-                + '<p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:#a1a1aa">'
+                + '<p style="font-size:15px;font-weight:800;color:' + C.title + '">Work Schedule</p>'
+                + '<p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;color:' + C.soft + '">'
                 + (wdpw ? wdpw + ' days / week' : 'How many days per week will you work?')
                 + '</p>'
                 + '</div></div>'
@@ -1470,7 +1743,7 @@
                         </div>
                         <div class="flex items-center gap-2 bg-zinc-100 p-1 rounded-2xl border border-black/5 self-start sm:self-auto">
                             <button onclick="window.changeMonth(-1)" class="w-8 h-8 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
-                            <button onclick="window.changeMonth(0)" class="px-4 py-2 bg-white shadow-sm rounded-xl text-[10px] md:text-xs font-bold text-zinc-900">Current Month</button>
+                            <button onclick="window.changeMonth(0)" class="px-4 py-2 ${currentMonth === localYM() ? 'bg-white shadow-sm' : 'bg-zinc-50'} rounded-xl text-[10px] md:text-xs font-bold text-zinc-900">${currentMonth === localYM() ? 'Current Month' : summaryMonthName + ' (back to today)'}</button>
                             <button onclick="window.changeMonth(1)" class="w-8 h-8 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
                         </div>
                     </div>
@@ -1553,8 +1826,8 @@
                         datasets: [{
                             label: 'Income NTD',
                             data: jobTotals.map(j => j.total),
-                            backgroundColor: currentChartType === 'line' ? 'rgba(24, 24, 27, 0.05)' : jobTotals.map(j => j.color),
-                            borderColor: currentChartType === 'line' ? '#18181b' : 'transparent',
+                            backgroundColor: currentChartType === 'line' ? (isDarkTheme() ? 'rgba(228, 228, 231, 0.08)' : 'rgba(24, 24, 27, 0.05)') : jobTotals.map(j => j.color),
+                            borderColor: currentChartType === 'line' ? (isDarkTheme() ? '#e4e4e7' : '#18181b') : 'transparent',
                             borderWidth: currentChartType === 'line' ? 4 : 0,
                             fill: currentChartType === 'line',
                             tension: 0.4
@@ -1563,10 +1836,15 @@
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
-                        plugins: { legend: { display: currentChartType === 'polarArea' } },
+                        plugins: {
+                            legend: {
+                                display: currentChartType === 'polarArea',
+                                labels: { color: chartColors() }
+                            }
+                        },
                         scales: currentChartType === 'polarArea' ? {} : {
-                            y: { beginAtZero: true, grid: { display: false } },
-                            x: { grid: { display: false } }
+                            y: { beginAtZero: true, grid: { display: false }, ticks: { color: chartColors() } },
+                            x: { grid: { display: false }, ticks: { color: chartColors() } }
                         }
                     }
                 });

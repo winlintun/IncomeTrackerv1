@@ -15,3 +15,8 @@ railway_backup/
 __pycache__
 __pycache__/*
 read_and_fix.md
+env/
+server/
+pytest_income.sqlite
+
+income_tracker.sqlite

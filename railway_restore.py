@@ -17,8 +17,13 @@ from datetime import datetime
 from pathlib import Path
 
 
-DATABASE_URL = "***REMOVED***"
+DATABASE_URL = os.environ.get('DATABASE_URL')
 BACKUP_DIR = Path("backups")
+
+if not DATABASE_URL:
+    print("DATABASE_URL environment variable is not set.")
+    print("Set it (e.g. from .env) before running this script: export $(grep -v '^#' .env | xargs)")
+    sys.exit(1)
 
 
 def check_pg_restore():

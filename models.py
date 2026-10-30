@@ -60,3 +60,12 @@ class Expense(db.Model):
     tags = db.Column(db.String(500), default='')           # comma-separated tags
     expense_type = db.Column(db.String(50), default='daily')  # daily / bills / work / one-time
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class PasswordResetToken(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    token = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

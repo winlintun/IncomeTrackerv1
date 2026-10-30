@@ -16,26 +16,83 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
 from dotenv import load_dotenv
-from models import db, User, Job, IncomeRecord, Target, Note, Expense
+from models import db, User, Job, IncomeRecord, Target, Note, Expense, PasswordResetToken
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.pool import StaticPool
 import time
+import secrets
+import unicodedata
 
 load_dotenv()
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
-database_url = os.getenv('DATABASE_URL', '***REMOVED***')
-if database_url and database_url.startswith('postgres://'):
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+if not app.config['SECRET_KEY']:
+    print('WARNING: SECRET_KEY is not set; using an insecure development fallback. Set the SECRET_KEY environment variable.')
+app.config['SECRET_KEY'] = app.config['SECRET_KEY'] or 'dev-secret-key'
+
+
+def describe_database_url(url):
+    try:
+        parsed = make_url(url)
+        host = parsed.host or 'local'
+        port = f':{parsed.port}' if parsed.port else ''
+        return f'{parsed.get_backend_name()}://{host}{port}/{parsed.database or ""}'
+    except Exception:
+        return 'unparseable database URL'
+
+
+database_url = (os.getenv('DATABASE_URL') or '').strip()
+is_development = os.getenv('FLASK_ENV') == 'development' or os.getenv('APP_ENV') == 'development'
+if not database_url:
+    if not is_development:
+        raise RuntimeError(
+            'DATABASE_URL is not set. Refusing to start outside development; '
+            'set DATABASE_URL to your PostgreSQL connection string.'
+        )
+    database_url = 'sqlite:///income_tracker.sqlite'
+    print('WARNING: DATABASE_URL is not set; using local SQLite because FLASK_ENV/APP_ENV=development.')
+if database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+if database_url.startswith('sqlite'):
+    sqlite_path = make_url(database_url).database
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'connect_args': {'check_same_thread': False}}
+    if sqlite_path in (None, '', ':memory:'):
+        app.config['SQLALCHEMY_ENGINE_OPTIONS']['poolclass'] = StaticPool
+else:
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_pre_ping': True}
+print(f'Database target: {describe_database_url(database_url)}')
 
 db.init_app(app)
 bcrypt = Bcrypt(app)
+DUMMY_PASSWORD_HASH = bcrypt.generate_password_hash(secrets.token_hex(8)).decode('utf-8')
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+@login_manager.unauthorized_handler
+def unauthorized():
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Authentication required'}), 401
+    return redirect(url_for('index'))
+
+
+@app.route('/api/health/db')
+def db_health():
+    try:
+        db.session.execute(text('SELECT 1'))
+        return jsonify({
+            'status': 'ok',
+            'dialect': db.engine.url.get_backend_name(),
+            'target': describe_database_url(db.engine.url)
+        })
+    except Exception:
+        app.logger.exception('Database health check failed')
+        return jsonify({'status': 'error'}), 503
 
 
 def init_db_with_retry(app, retries=5, delay=3):
@@ -50,7 +107,7 @@ def init_db_with_retry(app, retries=5, delay=3):
                         WHERE table_schema = 'public'
                     """))
                     tables = [row[0] for row in result]
-                    required_tables = {'user', 'job', 'income_record', 'target', 'note', 'expense'}
+                    required_tables = {'user', 'job', 'income_record', 'target', 'note', 'expense', 'password_reset_token'}
                     existing = set(tables)
                     missing = required_tables - existing
                     if missing:
@@ -66,7 +123,7 @@ def init_db_with_retry(app, retries=5, delay=3):
                 elif 'sqlite' in db_uri:
                     result = db.session.execute(text("PRAGMA table_list"))
                     tables = [row[1] for row in result]
-                    required_tables = {'user', 'job', 'income_record', 'target', 'note', 'expense'}
+                    required_tables = {'user', 'job', 'income_record', 'target', 'note', 'expense', 'password_reset_token'}
                     existing = set(tables)
                     missing = required_tables - existing
                     if missing:
@@ -95,28 +152,72 @@ def load_user(user_id):
 
 # --- Auth Routes ---
 
+def _validate_credentials(data, min_password_len=1):
+    if not isinstance(data, dict):
+        return None, None
+    username = data.get('username')
+    password = data.get('password')
+    if not isinstance(username, str) or not isinstance(password, str):
+        return None, None
+    username = username.strip()
+    if not username or len(username) > 80:
+        return None, None
+    if len(password) < min_password_len or len(password.encode('utf-8')) > 72:
+        return None, None
+    return username, password
+
+
+def _normalize_username(username):
+    return unicodedata.normalize('NFKC', username).casefold()
+
+
+def _find_user_by_username(username):
+    user = User.query.filter_by(username=username).first()
+    if user:
+        return user
+    normalized = _normalize_username(username)
+    for candidate in User.query.order_by(User.id):
+        if _normalize_username(candidate.username) == normalized:
+            return candidate
+    return None
+
 @app.route('/api/auth/register', methods=['POST'])
 def register():
-    data = request.json
-    if User.query.filter_by(username=data['username']).first():
+    data = request.json or {}
+    username, password = _validate_credentials(data, min_password_len=6)
+    if not username or not password:
+        return jsonify({'error': 'Username is required (max 80 chars) and password must be 6 to 72 bytes'}), 400
+
+    if _find_user_by_username(username):
         return jsonify({'error': 'Username already exists'}), 400
-    
-    hashed_pw = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-    new_user = User(username=data['username'], password_hash=hashed_pw)
-    
+
+    hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
+    new_user = User(username=username, password_hash=hashed_pw)
+
     # First user is admin
     if User.query.count() == 0:
         new_user.role = 'admin'
-        
+
     db.session.add(new_user)
     db.session.commit()
     return jsonify({'message': 'User created successfully'}), 201
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    data = request.json
-    user = User.query.filter_by(username=data['username']).first()
-    if user and bcrypt.check_password_hash(user.password_hash, data['password']):
+    data = request.json or {}
+    username, password = _validate_credentials(data)
+    if not username or not password:
+        return jsonify({'error': 'Invalid credentials'}), 401
+
+    user = _find_user_by_username(username)
+    try:
+        if user:
+            valid = bcrypt.check_password_hash(user.password_hash, password)
+        else:
+            valid = bcrypt.check_password_hash(DUMMY_PASSWORD_HASH, password)
+    except ValueError:
+        valid = False
+    if valid and user:
         login_user(user)
         return jsonify({
             'id': user.id,
@@ -124,6 +225,72 @@ def login():
             'role': user.role
         })
     return jsonify({'error': 'Invalid credentials'}), 401
+
+
+def _json_dict_or_none():
+    data = request.json
+    return data if isinstance(data, dict) else None
+
+@app.route('/api/auth/forgot-password', methods=['POST'])
+def forgot_password():
+    data = _json_dict_or_none()
+    if data is None:
+        return jsonify({'error': 'Invalid request body'}), 400
+    username = data.get('username')
+    if not isinstance(username, str):
+        return jsonify({'error': 'Username must be a string'}), 400
+    username = username.strip()
+    user = _find_user_by_username(username)
+
+    generic_message = ('If this account exists, a reset code has been generated (it expires in 30 minutes). '
+                       'The code is printed in the server logs or can be provided by an admin.')
+
+    if user:
+        token = secrets.token_hex(16)
+        expires_at = datetime.utcnow() + timedelta(minutes=30)
+        PasswordResetToken.query.filter_by(user_id=user.id, used=False).update({'used': True})
+        db.session.add(PasswordResetToken(user_id=user.id, token=token, expires_at=expires_at))
+        db.session.commit()
+
+        print(f"[PASSWORD RESET] Username: {user.username} | Reset code: {token} | Expires (UTC): {expires_at.isoformat()}")
+
+        response = {'message': generic_message}
+        if current_user.is_authenticated and current_user.role == 'admin':
+            response['reset_token'] = token
+        return jsonify(response), 200
+    return jsonify({'message': generic_message}), 200
+
+
+@app.route('/api/auth/reset-password', methods=['POST'])
+def reset_password():
+    data = _json_dict_or_none()
+    if data is None:
+        return jsonify({'error': 'Invalid request body'}), 400
+    username = data.get('username')
+    token = data.get('token')
+    if not isinstance(username, str) or not isinstance(token, str):
+        return jsonify({'error': 'Username and reset code must be strings'}), 400
+    username = username.strip()
+    token = token.strip()
+    new_password = data.get('new_password')
+    if not username or not token:
+        return jsonify({'error': 'Username and reset code are required'}), 400
+    if not isinstance(new_password, str) or len(new_password) < 6 or len(new_password.encode('utf-8')) > 72:
+        return jsonify({'error': 'Password must be 6 to 72 bytes'}), 400
+
+    reset = PasswordResetToken.query.filter_by(token=token, used=False).first()
+    if not reset or datetime.utcnow() > reset.expires_at:
+        return jsonify({'error': 'Invalid or expired reset code'}), 400
+
+    user = db.session.get(User, reset.user_id)
+    if not user or _normalize_username(user.username) != _normalize_username(username):
+        return jsonify({'error': 'Invalid or expired reset code'}), 400
+
+    user.password_hash = bcrypt.generate_password_hash(new_password).decode('utf-8')
+    PasswordResetToken.query.filter_by(user_id=user.id, used=False).update({'used': True})
+    db.session.commit()
+    return jsonify({'message': 'Password updated. You can now sign in.'})
+
 
 @app.route('/api/auth/logout')
 @login_required
@@ -369,7 +536,9 @@ def admin_manage_user(user_id):
 
     if user.role == 'admin' and User.query.filter_by(role='admin').count() <= 1:
         return jsonify({'error': 'Cannot delete the last admin'}), 400
-    
+
+    PasswordResetToken.query.filter_by(user_id=user_id).delete()
+    Note.query.filter_by(user_id=user_id).delete()
     db.session.delete(user)
     db.session.commit()
     return jsonify({'message': 'User deleted'})
