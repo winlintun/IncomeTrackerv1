@@ -5,11 +5,14 @@ A full-stack web application built with Flask and PostgreSQL to help users track
 ## Features
 
 *   **User Authentication**: Secure registration and login using `Flask-Login` and `Flask-Bcrypt`.
+*   **Password Reset**: Forgot-password flow with time-limited, single-use reset codes (30 minutes; printed to server logs or retrievable by the admin — no email dependency).
 *   **Dashboard**: View total income, total expenses, and net balance.
 *   **Transaction Management**: Add, edit, and delete income and expense records.
+*   **Notes**: A separate notes page for quick ideas and reminders.
+*   **Job Management**: Track jobs with hourly rates and hours per day; income records can be auto-calculated from them.
 *   **Admin Panel**: A dedicated dashboard for the admin to view all users and manage their roles.
 *   **Single Admin Rule**: The system strictly enforces that only one user can hold the `admin` role at any given time.
-*   **PostgreSQL Database**: Robust data storage using PostgreSQL and `Flask-SQLAlchemy`.
+*   **PostgreSQL Database**: Robust data storage using PostgreSQL and `Flask-SQLAlchemy` (SQLite fallback in development).
 
 ## Tech Stack
 
@@ -23,7 +26,7 @@ A full-stack web application built with Flask and PostgreSQL to help users track
 1.  **Clone the repository** (if you haven't already):
     ```bash
     git clone <your-repository-url>
-    cd income-tracker
+    cd IncomeTrackerv1
     ```
 
 2.  **Create a virtual environment**:
@@ -38,18 +41,33 @@ A full-stack web application built with Flask and PostgreSQL to help users track
     ```
 
 4.  **Environment Variables**:
-    Create a `.env` file in the root directory and add your configuration:
+    Create a `.env` file in the root directory (copy `.env.example` as a starting point) and add your configuration:
     ```env
     SECRET_KEY=your_super_secret_key_here
+    # Local PostgreSQL example
     DATABASE_URL=postgresql://user:password@localhost:5432/yourdb
+    # Or SQLite in development
+    # DATABASE_URL=sqlite:///income_tracker.sqlite
+    # FLASK_ENV=development
     ```
-    *(Note: The app is currently configured to use a remote PostgreSQL database. If you want to use a local one, update the `DATABASE_URL` accordingly).*
+    Required settings:
+    *   `SECRET_KEY` — **required in production**. The app refuses to start without it unless `FLASK_ENV` or `APP_ENV` is set to `development` (then it falls back to an insecure dev key).
+    *   `DATABASE_URL` — **required in production**. PostgreSQL connection string (`postgres://` URLs are auto-converted to `postgresql://`). In development the app falls back to local SQLite.
+    *   `FLASK_ENV=development` or `APP_ENV=development` — optional; enables the local development fallbacks above.
+    *   Never commit real credentials: `.env*`, backups, and the SQLite files listed in `.gitignore` are already ignored.
 
 5.  **Run the application**:
     ```bash
     python app.py
     ```
     The app will be available at `http://localhost:3000`.
+
+## Testing
+
+```bash
+python -m pytest tests/
+```
+The test suite always uses an in-memory SQLite database (`sqlite://`) and refuses to run against any other connected database, so it is safe to run locally and in CI.
 
 ## Deployment Guide (Koyeb / Railway / Render)
 
@@ -70,11 +88,17 @@ This means your hosting provider (like Koyeb) requires you to use their specific
 
 1.  **Connect your GitHub repository** to your hosting provider.
 2.  **Set Environment Variables** in your provider's dashboard:
-    *   `SECRET_KEY`: A strong random string.
-    *   `DATABASE_URL`: Your PostgreSQL connection string (e.g., `postgresql://...`).
+    *   `SECRET_KEY`: A strong random string (**required** — the app fails fast in production without it).
+    *   `DATABASE_URL`: Your PostgreSQL connection string (e.g., `postgresql://...`) — **required**.
 3.  **Build Command**: `pip install -r requirements.txt` (Most platforms detect this automatically).
 4.  **Start Command**: `gunicorn app:app --bind 0.0.0.0:$PORT` (Or rely on the included `Procfile`).
 5.  **Deploy!**
+
+### Security Notes
+
+*   **Never hardcode credentials** in `app.py`, templates, tests, or any tracked file. Read them from environment variables only.
+*   If credentials were ever committed and pushed, rotate them first (e.g., reset the database password on Railway and change `SECRET_KEY`), then purge them from git history (`git-filter-repo`) and force-push. Deleting the lines is not enough — git history keeps them.
+*   Password reset codes are time-limited (30 minutes), expire automatically, and are invalidated after a successful reset or when a newer code is requested.
 
 ## Project Structure
 

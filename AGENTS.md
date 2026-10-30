@@ -64,8 +64,9 @@ templates/          # index.html (dashboard), note.html (notes page)
 
 | Variable | Description |
 |----------|-------------|
-| `SECRET_KEY` | Flask secret key |
-| `DATABASE_URL` | PostgreSQL or SQLite (`sqlite:///path`) |
+| `SECRET_KEY` | Flask secret key (required; app refuses to start without it outside development) |
+| `DATABASE_URL` | PostgreSQL or SQLite (`sqlite:///path`); required outside development |
+| `FLASK_ENV` | Set to `development` to enable dev fallbacks (insecure dev key, local SQLite) |
 
 
 ##  Rule
