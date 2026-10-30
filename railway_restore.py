@@ -11,6 +11,8 @@ Usage:
 """
 
 import os
+import re
+import shutil
 import sys
 import subprocess
 import argparse
@@ -36,15 +38,86 @@ if not DATABASE_URL:
     sys.exit(1)
 
 
-def check_tool(name):
+def version_tuple(tool_path):
     try:
-        result = subprocess.run([name, "--version"], capture_output=True, text=True)
-        print(f"{name} found: {result.stdout.strip()}")
-        return True
-    except FileNotFoundError:
+        out = subprocess.run([tool_path, "--version"], capture_output=True, text=True).stdout
+        return tuple(int(x) for x in re.search(r'\d+(\.\d+)+', out).group(0).split('.'))
+    except Exception:
+        return (0,)
+
+
+def find_tool(name):
+    candidates = []
+    which = shutil.which(name)
+    if which:
+        candidates.append((which, None))
+    for tool_path in Path("/usr/lib/postgresql").glob("*/bin/" + name):
+        candidates.append((str(tool_path), None))
+    for tool_path in Path.home().glob(".opt/*/usr/lib/postgresql/*/bin/" + name):
+        lib_matches = sorted(Path(tool_path.parents[4], "lib").glob("*/libpq.so.5*"))
+        libdir = str(lib_matches[0].parent) if lib_matches else None
+        candidates.append((str(tool_path), libdir))
+
+    if not candidates:
         print(f"{name} not found.")
         print("Install with: brew install postgresql (macOS) or sudo apt install postgresql-client (Ubuntu)")
-        return False
+        return None
+
+    best_path, best_lib = max(candidates, key=lambda c: version_tuple(c[0]))
+    best_ver = '.'.join(str(x) for x in version_tuple(best_path))
+    print(f"{name} found: {best_ver} ({best_path})")
+    return best_path, best_lib
+
+
+def tool_env(libdir):
+    env = os.environ.copy()
+    if libdir:
+        env['LD_LIBRARY_PATH'] = f"{libdir}:{env['LD_LIBRARY_PATH']}" if env.get('LD_LIBRARY_PATH') else libdir
+    return env
+
+
+def create_backup():
+    tool = find_tool("pg_dump")
+    if tool is None:
+        sys.exit(1)
+    dump_bin, env = tool[0], tool_env(tool[1])
+    BACKUP_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = BACKUP_DIR / f"railway_backup_{timestamp}.dump"
+
+    print(f"\nBacking up database to: {out_path}")
+    print("-" * 50)
+    result = subprocess.run(
+        [
+            dump_bin,
+            "--dbname", DATABASE_URL,
+            "--format=custom",
+            "--no-owner",
+            "--no-acl",
+            "--file", str(out_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+
+    if result.returncode != 0:
+        out_path.unlink(missing_ok=True)
+        print(f"Backup FAILED:\n{result.stderr or result.stdout}")
+        sys.exit(1)
+
+    if not out_path.exists() or out_path.stat().st_size == 0:
+        out_path.unlink(missing_ok=True)
+        print(f"Backup produced no data: {out_path.name}")
+        sys.exit(1)
+
+    size = out_path.stat().st_size
+    size_str = f"{size/1024:.1f} KB" if size < 1024*1024 else f"{size/1024/1024:.1f} MB"
+    print(f"Backup complete: {out_path.name} ({size_str})")
+    if result.stderr.strip():
+        print(f"Warnings:\n{result.stderr.strip()}")
 
 
 def get_dumps():
@@ -70,45 +143,6 @@ def list_backups():
     return dumps
 
 
-def create_backup():
-    BACKUP_DIR.mkdir(exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = BACKUP_DIR / f"railway_backup_{timestamp}.dump"
-
-    print(f"\nBacking up database to: {out_path}")
-    print("-" * 50)
-    result = subprocess.run(
-        [
-            "pg_dump",
-            "--dbname", DATABASE_URL,
-            "--format=custom",
-            "--no-owner",
-            "--no-acl",
-            "--file", str(out_path),
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-
-    if result.returncode != 0:
-        out_path.unlink(missing_ok=True)
-        print(f"Backup FAILED:\n{result.stderr or result.stdout}")
-        sys.exit(1)
-
-    if not out_path.exists() or out_path.stat().st_size == 0:
-        out_path.unlink(missing_ok=True)
-        print(f"Backup produced no data: {out_path.name}")
-        sys.exit(1)
-
-    size = out_path.stat().st_size
-    size_str = f"{size/1024:.1f} KB" if size < 1024*1024 else f"{size/1024/1024:.1f} MB"
-    print(f"Backup complete: {out_path.name} ({size_str})")
-    if result.stderr.strip():
-        print(f"Warnings:\n{result.stderr.strip()}")
-
-
 def restore_backup(dump_path: Path):
     if not dump_path.exists():
         print(f"File not found: {dump_path}")
@@ -127,6 +161,11 @@ def restore_backup(dump_path: Path):
     print(f"Database: Railway PostgreSQL")
     print("-" * 50)
 
+    tool = find_tool("pg_restore")
+    if tool is None:
+        sys.exit(1)
+    restore_bin, env = tool[0], tool_env(tool[1])
+
     confirm = input("This will OVERWRITE all data in the database. Type 'yes' to continue: ").strip().lower()
     if confirm != "yes":
         print("Restore cancelled.")
@@ -135,7 +174,7 @@ def restore_backup(dump_path: Path):
     print("\nRestoring...")
     result = subprocess.run(
         [
-            "pg_restore",
+            restore_bin,
             "--dbname", DATABASE_URL,
             "--no-owner",
             "--no-acl",
@@ -148,6 +187,7 @@ def restore_backup(dump_path: Path):
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
     )
 
     if result.returncode != 0:
@@ -198,13 +238,8 @@ def main():
     args = parser.parse_args()
 
     if args.backup:
-        if not check_tool("pg_dump"):
-            sys.exit(1)
         create_backup()
         return
-
-    if not check_tool("pg_restore"):
-        sys.exit(1)
 
     if args.list:
         list_backups()
