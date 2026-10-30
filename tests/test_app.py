@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 TEST_DB = 'sqlite://'
 os.environ['DATABASE_URL'] = TEST_DB
+os.environ.setdefault('FLASK_ENV', 'development')
 
 from app import app as flask_app, bcrypt
 from models import db, User, Job, IncomeRecord, Target, Note, Expense

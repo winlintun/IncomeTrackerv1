@@ -28,10 +28,16 @@ import unicodedata
 load_dotenv()
 
 app = Flask(__name__)
+is_development = os.getenv('FLASK_ENV') == 'development' or os.getenv('APP_ENV') == 'development'
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 if not app.config['SECRET_KEY']:
+    if not is_development:
+        raise RuntimeError(
+            'SECRET_KEY is not set. Refusing to start outside development; '
+            'set SECRET_KEY to a strong random string.'
+        )
+    app.config['SECRET_KEY'] = 'dev-secret-key'
     print('WARNING: SECRET_KEY is not set; using an insecure development fallback. Set the SECRET_KEY environment variable.')
-app.config['SECRET_KEY'] = app.config['SECRET_KEY'] or 'dev-secret-key'
 
 
 def describe_database_url(url):
@@ -45,7 +51,6 @@ def describe_database_url(url):
 
 
 database_url = (os.getenv('DATABASE_URL') or '').strip()
-is_development = os.getenv('FLASK_ENV') == 'development' or os.getenv('APP_ENV') == 'development'
 if not database_url:
     if not is_development:
         raise RuntimeError(
