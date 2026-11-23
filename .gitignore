@@ -21,3 +21,4 @@ pytest_income.sqlite
 
 income_tracker.sqlite
 .qoder/
+opencode.json

@@ -1,0 +1,114 @@
+        :root {
+            --primary: #18181b;
+            --accent: #10b981;
+        }
+        body { 
+            font-family: 'Plus+Jakarta+Sans', sans-serif; 
+            background-color: #f8fafc;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass { 
+            background: rgba(255, 255, 255, 0.7); 
+            backdrop-filter: blur(12px); 
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .card-shadow {
+            box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 10px -2px rgba(0, 0, 0, 0.02);
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+        .input-field {
+            transition: all 0.2s ease;
+            border: 1px solid #e2e8f0;
+        }
+        .input-field:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(24, 24, 27, 0.05);
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slide { animation: slideIn 0.4s ease-out forwards; }
+
+        /* Dark theme: remap utility classes rendered by the SPA */
+        html.dark {
+            color-scheme: dark;
+        }
+        html.dark body { background-color: #0b0b0e; }
+        html.dark .bg-white { background-color: #17171b; }
+        html.dark .bg-zinc-50 { background-color: #1e1e23; }
+        html.dark .bg-zinc-50\/50 { background-color: rgba(30, 30, 35, 0.5); }
+        html.dark .bg-zinc-50\/30 { background-color: rgba(30, 30, 35, 0.3); }
+        html.dark .bg-zinc-100 { background-color: #26262b; }
+        html.dark .bg-zinc-200 { background-color: #2f2f35; }
+        html.dark .bg-zinc-800 { background-color: #55555e; }
+        html.dark .bg-zinc-900 { background-color: #27272c; }
+        html.dark .text-zinc-900 { color: #fafafa; }
+        html.dark .text-zinc-800 { color: #f4f4f5; }
+        html.dark .text-zinc-700 { color: #d4d4d8; }
+        html.dark .text-zinc-600 { color: #c6c6cc; }
+        html.dark .text-zinc-500 { color: #9b9ba3; }
+        html.dark .text-zinc-400 { color: #7c7c85; }
+        html.dark .text-zinc-300 { color: #55555e; }
+        html.dark .border-black\/5 { border-color: rgba(255, 255, 255, 0.06); }
+        html.dark .border-zinc-100 { border-color: #26262b; }
+        html.dark .border-zinc-200 { border-color: #2f2f35; }
+        html.dark .border-zinc-400 { border-color: #3f3f46; }
+        html.dark .hover\:border-zinc-400:hover { border-color: #3f3f46; }
+        html.dark .hover\:bg-zinc-50:hover { background-color: #26262b; }
+        html.dark .hover\:bg-zinc-100:hover { background-color: #2f2f35; }
+        html.dark .hover\:bg-zinc-200:hover { background-color: #3f3f46; }
+        html.dark .hover\:bg-zinc-800:hover { background-color: #303036; }
+        html.dark .hover\:bg-zinc-50\/50:hover { background-color: rgba(38, 38, 43, 0.5); }
+        html.dark .hover\:bg-zinc-50\/30:hover { background-color: rgba(38, 38, 43, 0.3); }
+        html.dark .hover\:text-zinc-900:hover { color: #e4e4e7; }
+        html.dark .hover\:text-zinc-600:hover { color: #d4d4d8; }
+        html.dark .hover\:bg-red-50:hover { background-color: rgba(239, 68, 68, 0.12); }
+        html.dark .bg-red-50 { background-color: rgba(239, 68, 68, 0.12); }
+        html.dark .bg-red-50\/40 { background-color: rgba(239, 68, 68, 0.08); }
+        html.dark .bg-amber-50 { background-color: rgba(245, 158, 11, 0.12); }
+        html.dark .border-red-200 { border-color: rgba(239, 68, 68, 0.35); }
+        html.dark .border-amber-200 { border-color: rgba(245, 158, 11, 0.35); }
+        html.dark .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.12); }
+        html.dark .border-red-100 { border-color: rgba(239, 68, 68, 0.25); }
+        html.dark .border-emerald-100 { border-color: rgba(16, 185, 129, 0.25); }
+        html.dark .card-shadow { box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 2px 10px -2px rgba(0, 0, 0, 0.3); }
+        html.dark .glass { background: rgba(23, 23, 27, 0.7); border-color: rgba(255, 255, 255, 0.08); }
+        html.dark .btn-primary { background: #fafafa; color: #18181b; }
+        html.dark .input-field { border-color: #2f2f35; }
+        html.dark .input-field:focus { border-color: #fafafa; box-shadow: 0 0 0 4px rgba(250, 250, 250, 0.08); }
+
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #18181b;
+            border-radius: 12px;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: none;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .toast.success { background: #10b981; }
+        .toast.error { background: #ef4444; }
+        .toast i { width: 18px; height: 18px; }
