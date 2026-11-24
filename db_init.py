@@ -6,7 +6,7 @@ from models import MAX_USERNAME_LEN, Setting, db, normalize_username
 def _migrate_user_normalized_postgres():
     result = db.session.execute(text("""
         SELECT column_name FROM information_schema.columns
-        WHERE table_name = 'user' AND column_name = 'username_normalized'
+        WHERE table_schema = 'public' AND table_name = 'user' AND column_name = 'username_normalized'
     """))
     if result.fetchone() is None:
         db.session.execute(text('ALTER TABLE "user" ADD COLUMN username_normalized VARCHAR(80)'))
@@ -188,7 +188,7 @@ def init_db_with_retry(app, retries=5, delay=3):
                         raise RuntimeError(f"Database initialization failed. Missing tables: {missing}")
                     result = db.session.execute(text("""
                         SELECT column_name FROM information_schema.columns
-                        WHERE table_name = 'target' AND column_name = 'work_days_per_week'
+                        WHERE table_schema = 'public' AND table_name = 'target' AND column_name = 'work_days_per_week'
                     """))
                     if result.fetchone() is None:
                         db.session.execute(text("ALTER TABLE target ADD COLUMN work_days_per_week FLOAT"))

@@ -29,7 +29,7 @@ Both are installed and authenticated.
       Create a minimal fix plan (numbered steps, exact files)." --mode plan > /tmp/agy-fix.md
    b. Implement the fixes.
    c. Re-run the qodercli review.
-   d. Maximum 1 fix iterations. If still failing after 3, report to the user
+   d. Maximum 1 fix iterations. If still failing after 1, report to the user
       with the remaining issues.
 
 5. Only report the task complete when qodercli outputs LGTM, or after

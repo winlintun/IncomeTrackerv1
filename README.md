@@ -64,32 +64,37 @@ A full-stack web application built with Flask and PostgreSQL to help users track
 
 ## Running with Docker
 
-Works the same on Linux, macOS, and Windows.
+Works the same on Linux, macOS, and Windows. The app connects to **your own PostgreSQL** by default; a bundled PostgreSQL is available as an opt-in.
 
 1.  **Prerequisite**: Docker Desktop (macOS / Windows) or Docker Engine with the Compose plugin (Linux).
 
-2.  **Configure environment**: Copy `.env.example` to `.env` and set a strong `SECRET_KEY`:
-    ```bash
-    cp .env.example .env
-    python -c "import secrets; print('SECRET_KEY=' + secrets.token_hex(32))" >> .env
+2.  **Configure environment**: Copy `.env.example` to `.env`, set a strong `SECRET_KEY`, and point `DATABASE_URL` at your PostgreSQL server — for example a server-side PostgreSQL reached from containers via the Docker bridge gateway (`172.17.0.1` is the native Linux gateway; Docker Desktop on macOS / Windows uses `host.docker.internal` instead):
+    ```env
+    SECRET_KEY=<generated strong key>
+    DATABASE_URL=postgresql://dbuser:<password>@172.17.0.1:5432/yourdb
     ```
-    Optionally uncomment `PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` in `.env` to customize the container setup. `docker-compose.yml` provisions a PostgreSQL 16 database automatically and never commits secrets.
+    Generate a key with `python -c "import secrets; print(secrets.token_hex(32))"`.
+    Real credentials live **only** in `.env`: it is gitignored, excluded from the Docker image, and should be `chmod 600 .env`. Passwords never reach git or image layers. On the wire the password exchange is protected when the role uses a SCRAM-hashed password and `pg_hba.conf` selects `scram-sha-256` (the PostgreSQL 14+ default); SCRAM protects the password, not the data in transit — append `?sslmode=require` to `DATABASE_URL` for remote hosts reached over a network.
+    Use a **dedicated database**: on startup the app automatically creates tables and runs migrations (including `ALTER TABLE`, unique index creation, deduplicating `DELETE`s on `target` / `expense_budget`, and duplicate-username renames on `user`), so the role needs `CREATE`, `ALTER`, `INDEX`, and `DELETE` privileges on the `public` schema — never point it at a shared database with same-named tables.
 
-3.  **Build and start**:
+3.  **Build and start** (your own PostgreSQL):
     ```bash
     docker compose up --build        # foreground
     docker compose up --build -d     # detached
     ```
 
-4.  **Verify**: Open `http://localhost:3000` and check `http://localhost:3000/api/health/db` returns `{"status":"ok"}`. Data persists in the `postgres_data` volume across restarts.
+4.  **Verify**: Open `http://localhost:3000` and check `http://localhost:3000/api/health/db` returns `{"status":"ok"}`.
 
-5.  **Stop / reset**:
+5.  **No PostgreSQL server yet?** Use the bundled one instead:
     ```bash
-    docker compose down      # stop and remove containers (data is kept)
-    docker compose down -v  # also delete the PostgreSQL data volume
+    docker compose -f docker-compose.yml -f docker-compose.local-db.yml up --build
     ```
+    Data persists in the `postgres_data` volume. Bundled-mode commands need the same `-f` flags: stop with `docker compose -f docker-compose.yml -f docker-compose.local-db.yml down`, or delete the volume with `docker compose -f docker-compose.yml -f docker-compose.local-db.yml down -v`. Plain `docker compose down` applies to the default external-DB mode.
+    `.env` must still contain a **non-empty** `DATABASE_URL` — compose validates the base file before the override replaces the value with the bundled database's URL. Use alphanumeric `POSTGRES_USER` / `POSTGRES_PASSWORD` values in this mode; the bundled URL is assembled without percent-encoding, so characters like `@ : / # ? %` in the password break it.
 
-**Note on session cookies over plain HTTP**: outside `FLASK_ENV=development` the app sets `SESSION_COOKIE_SECURE=True`. Browsers accept these cookies on `http://localhost:3000`, but Safari or LAN-IP access over plain HTTP will reject them. For non-localhost HTTP testing set `FLASK_ENV=development` in `.env`; in production terminate TLS at a reverse proxy.
+**Host PostgreSQL via the Docker bridge (Linux)**: for containers to reach a PostgreSQL running on the host itself, the server must listen on the bridge and accept connections from it. In `postgresql.conf` set `listen_addresses = 'localhost,172.17.0.1'` (avoid `'*'`), in `pg_hba.conf` add a line like `host yourdb dbuser 172.17.0.0/16 scram-sha-256`, use a long random password for the role (it is reachable from every container on the bridge), reload PostgreSQL, and allow port 5432 from the bridge if a firewall is active.
+
+**Note on session cookies over plain HTTP**: outside development mode the app sets `SESSION_COOKIE_SECURE=True`. Browsers accept these cookies on `http://localhost:3000`, but Safari or LAN-IP access over plain HTTP will reject them. For non-localhost HTTP testing in Docker set `APP_ENV=development` in `.env` (containers do not receive `FLASK_ENV`); in production terminate TLS at a reverse proxy.
 
 ## Testing
 
@@ -137,5 +142,6 @@ This means your hosting provider (like Koyeb) requires you to use their specific
 *   `requirements.txt`: Python dependencies.
 *   `Procfile`: Command to run the web process in production.
 *   `Dockerfile`: Container image definition (Python 3.12-slim, non-root, Gunicorn).
-*   `docker-compose.yml`: App + PostgreSQL stack with healthchecks.
+*   `docker-compose.yml`: Runs the app connected to your own PostgreSQL (`DATABASE_URL` from `.env`).
+*   `docker-compose.local-db.yml`: Opt-in override adding a bundled PostgreSQL with healthcheck.
 *   `.dockerignore`: Keeps secrets, virtualenvs, and dev artifacts out of the image.
