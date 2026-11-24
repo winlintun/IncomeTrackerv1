@@ -85,12 +85,12 @@ Works the same on Linux, macOS, and Windows. The app connects to **your own Post
 
 4.  **Verify**: Open `http://localhost:3000` and check `http://localhost:3000/api/health/db` returns `{"status":"ok"}`.
 
-5.  **No PostgreSQL server yet?** Use the bundled one instead:
+5.  **No PostgreSQL server yet?** Use the bundled one instead — first set `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` in `.env` (there are no default credentials; compose fails with a clear error if any is missing):
     ```bash
     docker compose -f docker-compose.yml -f docker-compose.local-db.yml up --build
     ```
     Data persists in the `postgres_data` volume. Bundled-mode commands need the same `-f` flags: stop with `docker compose -f docker-compose.yml -f docker-compose.local-db.yml down`, or delete the volume with `docker compose -f docker-compose.yml -f docker-compose.local-db.yml down -v`. Plain `docker compose down` applies to the default external-DB mode.
-    `.env` must still contain a **non-empty** `DATABASE_URL` — compose validates the base file before the override replaces the value with the bundled database's URL. Use alphanumeric `POSTGRES_USER` / `POSTGRES_PASSWORD` values in this mode; the bundled URL is assembled without percent-encoding, so characters like `@ : / # ? %` in the password break it.
+    `.env` must still contain a **non-empty** `DATABASE_URL` — compose validates the base file before the override replaces the value with the bundled database's URL. Use alphanumeric `POSTGRES_USER` / `POSTGRES_PASSWORD` values; the bundled URL is assembled without percent-encoding, so characters like `@ : / # ? %` in the password break it.
 
 **Host PostgreSQL via the Docker bridge (Linux)**: for containers to reach a PostgreSQL running on the host itself, the server must listen on the bridge and accept connections from it. In `postgresql.conf` set `listen_addresses = 'localhost,172.17.0.1'` (avoid `'*'`), in `pg_hba.conf` add a line like `host yourdb dbuser 172.17.0.0/16 scram-sha-256`, use a long random password for the role (it is reachable from every container on the bridge), reload PostgreSQL, and allow port 5432 from the bridge if a firewall is active.
 
