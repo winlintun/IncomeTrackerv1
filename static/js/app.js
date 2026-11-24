@@ -65,11 +65,13 @@
         }
 
         async function fetchStats() {
+            const month = state.selectedMonth;
             try {
-                const res = await fetch(`/api/expenses/stats?month=${state.selectedMonth}`);
-                state.expenseStats = res.ok ? await res.json() : null;
+                const res = await fetch(`/api/expenses/stats?month=${month}`);
+                const data = res.ok ? await res.json() : null;
+                if (state.selectedMonth === month) state.expenseStats = data;
             } catch (e) {
-                state.expenseStats = null;
+                if (state.selectedMonth === month) state.expenseStats = null;
             }
         }
 
@@ -2253,7 +2255,8 @@
                 state.expenses.filter(e => e.date === date).reduce((s, e) => s + e.amount, 0)
             );
 
-            const monthStats = state.expenseStats && state.expenseStats.month === currentMonth ? state.expenseStats : null;
+            const stats = state.expenseStats;
+            const monthStats = stats && stats.month === currentMonth ? stats : null;
             const budgetCards = Object.entries(typeConfig).map(([type, cfg]) => {
                 const b = monthStats ? monthStats.budgets[type] : null;
                 const spent = b ? b.spent : (byType[type] || 0);
