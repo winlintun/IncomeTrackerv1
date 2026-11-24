@@ -62,6 +62,35 @@ A full-stack web application built with Flask and PostgreSQL to help users track
     ```
     The app will be available at `http://localhost:3000`.
 
+## Running with Docker
+
+Works the same on Linux, macOS, and Windows.
+
+1.  **Prerequisite**: Docker Desktop (macOS / Windows) or Docker Engine with the Compose plugin (Linux).
+
+2.  **Configure environment**: Copy `.env.example` to `.env` and set a strong `SECRET_KEY`:
+    ```bash
+    cp .env.example .env
+    python -c "import secrets; print('SECRET_KEY=' + secrets.token_hex(32))" >> .env
+    ```
+    Optionally uncomment `PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` in `.env` to customize the container setup. `docker-compose.yml` provisions a PostgreSQL 16 database automatically and never commits secrets.
+
+3.  **Build and start**:
+    ```bash
+    docker compose up --build        # foreground
+    docker compose up --build -d     # detached
+    ```
+
+4.  **Verify**: Open `http://localhost:3000` and check `http://localhost:3000/api/health/db` returns `{"status":"ok"}`. Data persists in the `postgres_data` volume across restarts.
+
+5.  **Stop / reset**:
+    ```bash
+    docker compose down      # stop and remove containers (data is kept)
+    docker compose down -v  # also delete the PostgreSQL data volume
+    ```
+
+**Note on session cookies over plain HTTP**: outside `FLASK_ENV=development` the app sets `SESSION_COOKIE_SECURE=True`. Browsers accept these cookies on `http://localhost:3000`, but Safari or LAN-IP access over plain HTTP will reject them. For non-localhost HTTP testing set `FLASK_ENV=development` in `.env`; in production terminate TLS at a reverse proxy.
+
 ## Testing
 
 ```bash
@@ -107,3 +136,6 @@ This means your hosting provider (like Koyeb) requires you to use their specific
 *   `templates/index.html`: The single-page frontend application.
 *   `requirements.txt`: Python dependencies.
 *   `Procfile`: Command to run the web process in production.
+*   `Dockerfile`: Container image definition (Python 3.12-slim, non-root, Gunicorn).
+*   `docker-compose.yml`: App + PostgreSQL stack with healthchecks.
+*   `.dockerignore`: Keeps secrets, virtualenvs, and dev artifacts out of the image.
