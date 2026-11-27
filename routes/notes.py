@@ -1,7 +1,15 @@
 from flask import Blueprint, jsonify, render_template, request
 from flask_login import current_user, login_required
 from models import Note, db
-from validators import MAX_NOTE_TITLE_LEN, _clean_str, _require_body, utcnow
+from validators import (
+    MAX_NOTE_TITLE_LEN,
+    _clean_str,
+    _month_bounds,
+    _parse_pagination,
+    _require_body,
+    _valid_month,
+    utcnow,
+)
 
 notes_bp = Blueprint('notes', __name__)
 
@@ -46,9 +54,31 @@ def manage_notes():
             'updated_at': note.updated_at.isoformat()
         }), 201
 
-    notes = Note.query.filter_by(user_id=current_user.id)\
-        .order_by(Note.pinned.desc(), Note.updated_at.desc()).all()
-    return jsonify([{
+    query = Note.query.filter_by(user_id=current_user.id)
+    month_arg = request.args.get('month')
+    if month_arg is not None and month_arg != '':
+        month = _valid_month(month_arg)
+        if not month:
+            return jsonify({'error': 'month must be YYYY-MM'}), 400
+        start_dt, end_dt = _month_bounds(month)
+        query = query.filter(Note.updated_at >= start_dt, Note.updated_at < end_dt)
+
+    limit, offset, page_error = _parse_pagination()
+    if page_error:
+        return page_error
+
+    total = None
+    if limit is not None or offset is not None:
+        total = query.count()
+
+    query = query.order_by(Note.pinned.desc(), Note.updated_at.desc(), Note.id.desc())
+    if offset is not None:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+
+    notes = query.all()
+    resp = jsonify([{
         'id': n.id,
         'title': n.title,
         'content': n.content,
@@ -56,6 +86,9 @@ def manage_notes():
         'created_at': n.created_at.isoformat(),
         'updated_at': n.updated_at.isoformat()
     } for n in notes])
+    if total is not None:
+        resp.headers['X-Total-Count'] = str(total)
+    return resp
 
 
 @notes_bp.route('/api/notes/<int:note_id>', methods=['GET', 'PUT', 'DELETE'])

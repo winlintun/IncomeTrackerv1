@@ -3,6 +3,13 @@ let notes = [];
 let activeNote = null;
 let saveTimer = null;
 let searchQuery = '';
+let dirtyNoteId = null;
+let editVersion = 0;
+
+function toggleTheme() {
+  const isDark = document.documentElement.classList.toggle('dark');
+  try { localStorage.setItem('theme', isDark ? 'dark' : 'light'); } catch (e) {}
+}
 
 async function fetchNotes() {
   try {
@@ -72,8 +79,26 @@ function escHtml(s) {
     .replace(/'/g,'&#39;');
 }
 
+function captureSnapshot() {
+  if (!activeNote) return null;
+  const titleEl = document.getElementById('note-title-input');
+  const bodyEl = document.getElementById('note-body-input');
+  return {
+    id: activeNote.id,
+    title: (titleEl ? titleEl.value.trim() : '') || 'Untitled',
+    content: bodyEl ? bodyEl.value : '',
+    version: editVersion,
+  };
+}
+
 function openNote(id) {
-  if (saveTimer) { clearTimeout(saveTimer); saveNow(); }
+  if (activeNote && (saveTimer || dirtyNoteId === activeNote.id)) {
+    const pending = captureSnapshot();
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    dirtyNoteId = null;
+    if (pending) saveNow(pending);
+  }
   activeNote = notes.find(n => n.id === id);
   if (!activeNote) return;
 
@@ -125,32 +150,54 @@ async function createNote() {
 }
 
 function scheduleSave() {
+  if (!activeNote) return;
+  dirtyNoteId = activeNote.id;
+  editVersion += 1;
   setSaveIndicator('saving');
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveNow, 900);
+  const snapshot = captureSnapshot();
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    saveNow(snapshot);
+  }, 900);
 }
 
-async function saveNow() {
-  if (!activeNote) return;
-  const title = document.getElementById('note-title-input').value.trim() || 'Untitled';
-  const content = document.getElementById('note-body-input').value;
+async function saveNow(snapshot = null) {
+  const target = snapshot || captureSnapshot();
+  if (!target) return;
+  if (dirtyNoteId === target.id && editVersion === target.version) {
+    dirtyNoteId = null;
+  }
   try {
-    const res = await fetch(`${API}/${activeNote.id}`, {
+    const res = await fetch(`${API}/${target.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ title, content })
+      body: JSON.stringify({ title: target.title, content: target.content })
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const updated = await res.json();
-    activeNote.title = updated.title;
-    activeNote.content = updated.content;
-    activeNote.updated_at = updated.updated_at;
-    setSaveIndicator('saved');
-    document.getElementById('note-date-line').textContent = 'Last edited ' + formatDate(updated.updated_at);
-    const idx = notes.findIndex(n => n.id === activeNote.id);
-    if (idx !== -1) notes[idx] = activeNote;
-    renderList(getFilteredNotes());
-  } catch(e) { setSaveIndicator('error'); }
+    const isCurrentNote = activeNote && activeNote.id === target.id;
+    const isStale = isCurrentNote && editVersion !== target.version;
+    if (!isStale) {
+      const idx = notes.findIndex(n => n.id === target.id);
+      if (idx !== -1) {
+        Object.assign(notes[idx], { title: updated.title, content: updated.content, updated_at: updated.updated_at });
+      }
+      if (isCurrentNote) {
+        activeNote.title = updated.title;
+        activeNote.content = updated.content;
+        activeNote.updated_at = updated.updated_at;
+        setSaveIndicator('saved');
+        document.getElementById('note-date-line').textContent = 'Last edited ' + formatDate(updated.updated_at);
+      }
+      renderList(getFilteredNotes());
+    }
+  } catch(e) {
+    if (activeNote && activeNote.id === target.id) {
+      setSaveIndicator('error');
+    }
+  }
 }
 
 async function togglePin() {
@@ -179,6 +226,11 @@ function closeModal() { document.getElementById('delete-modal').classList.remove
 async function deleteNote() {
   closeModal();
   if (!activeNote) return;
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  dirtyNoteId = null;
   const id = activeNote.id;
   try {
     await fetch(`${API}/${id}`, { method: 'DELETE', credentials: 'include' });
@@ -207,6 +259,7 @@ function getFilteredNotes() {
 function setSaveIndicator(state) {
   const el = document.getElementById('save-indicator');
   el.className = 'save-indicator';
+  el.style.color = '';
   if (state === 'saved') { el.textContent = 'Saved'; el.classList.add('saved'); }
   else if (state === 'saving') { el.textContent = 'Saving…'; }
   else if (state === 'error') { el.textContent = 'Save failed'; el.style.color = 'var(--danger)'; }
@@ -240,12 +293,34 @@ function toggleNavMenu() {
 }
 
 window.addEventListener('beforeunload', () => {
-  if (saveTimer) saveNow();
+  if (activeNote && (saveTimer || dirtyNoteId === activeNote.id)) {
+    const snapshot = captureSnapshot();
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    dirtyNoteId = null;
+    if (snapshot) {
+      fetch(`${API}/${snapshot.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        keepalive: true,
+        body: JSON.stringify({ title: snapshot.title, content: snapshot.content })
+      }).catch(() => {});
+    }
+  }
 });
 
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal(); }
   if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); createNote(); }
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (saveTimer) { clearTimeout(saveTimer); saveNow(); } }
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    if (activeNote && (saveTimer || dirtyNoteId === activeNote.id)) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+      saveNow(captureSnapshot());
+    }
+  }
 });
 
 fetchNotes();

@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <title>Notes — Income Tracker</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script>
+  try { if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}
+</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/notes.css') }}">
 </head>
 <body>
@@ -13,7 +16,7 @@
 <nav class="app-nav">
   <a class="app-nav-brand" href="/">
     <div class="app-nav-logo">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#0f0f0f" stroke-width="2.5" width="17" height="17">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="17" height="17">
         <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
         <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
         <path d="M18 12a2 2 0 0 0 0 4h4v-4z"/>
@@ -24,18 +27,29 @@
 
   <div class="app-nav-links" id="nav-links">
     <a class="app-nav-link" href="/?view=dashboard">Dashboard</a>
-    <a class="app-nav-link" href="/?view=jobs">Jobs</a>
     <a class="app-nav-link" href="/?view=income">Tracking</a>
+    <a class="app-nav-link" href="/?view=expenses">Expenses</a>
+    <a class="app-nav-link" href="/?view=jobs">Jobs</a>
     <a class="app-nav-link" href="/?view=targets">Targets</a>
     <a class="app-nav-link" href="/?view=summary">Summary</a>
+    {% if current_user.role == 'admin' %}
     <a class="app-nav-link" href="/?view=admin">Admin</a>
+    {% endif %}
     <a class="app-nav-link notes-active" href="/notes">Notes</a>
+    <a class="app-nav-link" href="/?view=profile">Profile</a>
   </div>
-  <button class="mobile-menu-btn" onclick="toggleNavMenu()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-      <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
-    </svg>
-  </button>
+  <div class="app-nav-actions">
+    <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" aria-label="Toggle light or dark theme" title="Toggle light/dark theme">
+      <svg id="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+      </svg>
+    </button>
+    <button type="button" class="mobile-menu-btn" onclick="toggleNavMenu()" aria-label="Toggle navigation menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+        <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
+  </div>
 </nav>
 
 <div class="notes-body">
@@ -108,18 +122,18 @@
 
 </div>
 
-<div class="modal-overlay" id="delete-modal">
+<div class="modal-overlay" id="delete-modal" role="dialog" aria-modal="true" aria-label="Delete note confirmation">
   <div class="modal">
     <h3>Delete this note?</h3>
     <p>This action cannot be undone. The note will be permanently removed.</p>
     <div class="modal-btns">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn danger" onclick="deleteNote()">Delete</button>
+      <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+      <button type="button" class="btn danger" onclick="deleteNote()">Delete</button>
     </div>
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="{{ url_for('static', filename='js/csrf.js') }}"></script>
 <script src="{{ url_for('static', filename='js/notes.js') }}"></script>

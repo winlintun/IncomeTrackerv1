@@ -1,23 +1,48 @@
   :root {
-    --bg: #0f0f0f;
-    --bg2: #161616;
-    --bg3: #1e1e1e;
-    --bg4: #252525;
-    --border: #2e2e2e;
-    --border2: #3a3a3a;
-    --text: #f0ede8;
-    --text2: #9e9a94;
-    --text3: #5c5856;
-    --accent: #d4a853;
-    --accent2: #e8c278;
-    --accent-bg: rgba(212,168,83,0.08);
-    --accent-border: rgba(212,168,83,0.25);
-    --pin: #d4a853;
-    --danger: #c9554a;
-    --danger-bg: rgba(201,85,74,0.08);
-    --success: #5c9e6e;
+    --bg: #f8fafc;
+    --bg2: #ffffff;
+    --bg3: #f4f4f5;
+    --bg4: #e4e4e7;
+    --border: #e4e4e7;
+    --border2: #d4d4d8;
+    --text: #18181b;
+    --text2: #52525b;
+    --text3: #71717a;
+    --accent: #10b981;
+    --accent2: #059669;
+    --accent-bg: rgba(16, 185, 129, 0.1);
+    --accent-border: rgba(16, 185, 129, 0.3);
+    --pin: #d97706;
+    --danger: #ef4444;
+    --danger-bg: rgba(239, 68, 68, 0.08);
+    --success: #10b981;
+    --logo-bg: #18181b;
+    --logo-fg: #ffffff;
     --radius: 10px;
     --radius-lg: 14px;
+  }
+
+  html.dark {
+    color-scheme: dark;
+    --bg: #0b0b0e;
+    --bg2: #17171b;
+    --bg3: #1e1e23;
+    --bg4: #26262b;
+    --border: #26262b;
+    --border2: #3f3f46;
+    --text: #fafafa;
+    --text2: #a1a1aa;
+    --text3: #71717a;
+    --accent: #10b981;
+    --accent2: #34d399;
+    --accent-bg: rgba(16, 185, 129, 0.14);
+    --accent-border: rgba(16, 185, 129, 0.35);
+    --pin: #f59e0b;
+    --danger: #f87171;
+    --danger-bg: rgba(239, 68, 68, 0.12);
+    --success: #34d399;
+    --logo-bg: #fafafa;
+    --logo-fg: #18181b;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -25,7 +50,7 @@
   html, body { height: 100%; overflow: hidden; }
 
   body {
-    font-family: 'Instrument Sans', sans-serif;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     background: var(--bg);
     color: var(--text);
     height: 100%;
@@ -38,7 +63,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 20px;
-    background: #111111;
+    background: var(--bg2);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     gap: 12px;
@@ -55,7 +80,8 @@
   .app-nav-logo {
     width: 32px;
     height: 32px;
-    background: var(--accent);
+    background: var(--logo-bg);
+    color: var(--logo-fg);
     border-radius: 8px;
     display: flex;
     align-items: center;
@@ -73,7 +99,7 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    background: var(--bg2);
+    background: var(--bg3);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 4px;
@@ -88,12 +114,31 @@
     text-decoration: none;
     transition: all 0.15s;
   }
-  .app-nav-link:hover { background: var(--bg3); color: var(--text2); }
+  .app-nav-link:hover { background: var(--bg4); color: var(--text); }
   .app-nav-link.notes-active {
     background: var(--accent-bg);
     border: 1px solid var(--accent-border);
     color: var(--accent);
   }
+  .app-nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .theme-toggle-btn {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text2);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .theme-toggle-btn:hover { background: var(--bg3); color: var(--text); border-color: var(--border2); }
   .mobile-menu-btn {
     display: none;
     padding: 8px;
@@ -285,7 +330,7 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    height: 100vh;
+    height: 100%;
     overflow: hidden;
   }
 
@@ -363,28 +408,10 @@
 
   #note-title-input::placeholder { color: var(--text3); }
 
-  #note-body-input {
-    background: transparent;
-    border: none;
-    outline: none;
-    font-family: 'Instrument Sans', sans-serif;
-    font-size: 15px;
-    color: var(--text2);
-    width: 100%;
-    flex: 1;
-    resize: none;
-    line-height: 1.75;
-    caret-color: var(--accent);
-    min-height: 400px;
-    -webkit-appearance: none;
-  }
-
-  #note-title-input::placeholder { color: var(--text3); }
-
   .note-date-line {
     font-size: 12px;
     color: var(--text3);
-    font-family: 'DM Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     margin-bottom: 24px;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--border);
@@ -394,7 +421,7 @@
     background: transparent;
     border: none;
     outline: none;
-    font-family: 'Instrument Sans', sans-serif;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-size: 15px;
     color: var(--text2);
     width: 100%;
@@ -403,6 +430,7 @@
     line-height: 1.75;
     caret-color: var(--accent);
     min-height: 400px;
+    -webkit-appearance: none;
   }
 
   #note-body-input::placeholder { color: var(--text3); }

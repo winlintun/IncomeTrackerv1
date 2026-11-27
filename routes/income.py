@@ -1,7 +1,14 @@
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 from models import IncomeRecord, Job, db
-from validators import _require_body, _resolve_amount, _valid_date
+from validators import (
+    _as_float,
+    _parse_pagination,
+    _require_body,
+    _resolve_amount,
+    _valid_date,
+    _valid_month,
+)
 
 income_bp = Blueprint('income', __name__)
 
@@ -44,18 +51,43 @@ def manage_income():
             'id': new_record.id,
             'job_id': new_record.job_id,
             'date': new_record.date,
-            'amount': new_record.amount,
+            'amount': _as_float(new_record.amount),
             'job_name': new_record.job_name
         }), 201
 
-    records = IncomeRecord.query.filter_by(user_id=current_user.id).order_by(IncomeRecord.date.desc()).all()
-    return jsonify([{
+    query = IncomeRecord.query.filter_by(user_id=current_user.id)
+    month_arg = request.args.get('month')
+    if month_arg is not None and month_arg != '':
+        month = _valid_month(month_arg)
+        if not month:
+            return jsonify({'error': 'month must be YYYY-MM'}), 400
+        query = query.filter(IncomeRecord.date.startswith(month))
+
+    limit, offset, page_error = _parse_pagination()
+    if page_error:
+        return page_error
+
+    total = None
+    if limit is not None or offset is not None:
+        total = query.count()
+
+    query = query.order_by(IncomeRecord.date.desc(), IncomeRecord.id.desc())
+    if offset is not None:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+
+    records = query.all()
+    resp = jsonify([{
         'id': r.id,
         'job_id': r.job_id,
         'date': r.date,
-        'amount': r.amount,
+        'amount': _as_float(r.amount),
         'job_name': r.job_name
     } for r in records])
+    if total is not None:
+        resp.headers['X-Total-Count'] = str(total)
+    return resp
 
 
 @income_bp.route('/api/income/<int:record_id>', methods=['GET', 'PUT', 'DELETE'])
@@ -76,7 +108,7 @@ def manage_income_item(record_id):
             'job_id': record.job_id,
             'job_name': record.job_name,
             'date': record.date,
-            'amount': record.amount
+            'amount': _as_float(record.amount)
         })
 
     data, error = _require_body()
@@ -111,5 +143,5 @@ def manage_income_item(record_id):
         'job_id': record.job_id,
         'job_name': record.job_name,
         'date': record.date,
-        'amount': record.amount
+        'amount': _as_float(record.amount)
     })

@@ -20,6 +20,8 @@ MAX_DESCRIPTION_LEN = 200
 MAX_TAGS_LEN = 500
 MAX_TAG_LEN = 50
 MAX_COLOR_LEN = 20
+MAX_MONETARY_AMOUNT = 9999999999.99
+MAX_PAGINATION_OFFSET = 2**31 - 1
 
 
 def describe_database_url(url):
@@ -72,6 +74,12 @@ def _valid_expense_type(value):
     return value
 
 
+def _as_float(value):
+    if value is None:
+        return 0.0
+    return float(value)
+
+
 def _valid_amount(value):
     if isinstance(value, bool):
         return None
@@ -79,9 +87,9 @@ def _valid_amount(value):
         amount = float(value)
     except (TypeError, ValueError):
         return None
-    if not math.isfinite(amount) or amount < 0:
+    if not math.isfinite(amount) or amount < 0 or amount > MAX_MONETARY_AMOUNT:
         return None
-    return amount
+    return round(amount, 2)
 
 
 def _resolve_amount(raw, job, present):
@@ -93,10 +101,45 @@ def _resolve_amount(raw, job, present):
     if parsed is None:
         return None, 'Invalid amount value'
     if parsed == 0:
-        parsed = job.hourly_rate * job.hours_per_day
-        if not math.isfinite(parsed) or parsed < 0:
+        parsed = round(_as_float(job.hourly_rate) * _as_float(job.hours_per_day), 2)
+        if not math.isfinite(parsed) or parsed < 0 or parsed > MAX_MONETARY_AMOUNT:
             return None, 'Invalid amount value'
     return parsed, None
+
+
+def _month_bounds(month_str):
+    year, month = map(int, month_str.split('-'))
+    start = datetime(year, month, 1)
+    if month == 12:
+        end = datetime(year + 1, 1, 1)
+    else:
+        end = datetime(year, month + 1, 1)
+    return start, end
+
+
+def _parse_pagination(max_limit=500):
+    raw_limit = request.args.get('limit')
+    raw_offset = request.args.get('offset')
+    limit = None
+    offset = None
+
+    if raw_limit is not None and raw_limit != '':
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            return None, None, (jsonify({'error': f'limit must be an integer between 1 and {max_limit}'}), 400)
+        if limit < 1 or limit > max_limit:
+            return None, None, (jsonify({'error': f'limit must be an integer between 1 and {max_limit}'}), 400)
+
+    if raw_offset is not None and raw_offset != '':
+        try:
+            offset = int(raw_offset)
+        except ValueError:
+            return None, None, (jsonify({'error': 'offset must be a non-negative integer'}), 400)
+        if offset < 0 or offset > MAX_PAGINATION_OFFSET:
+            return None, None, (jsonify({'error': f'offset must be between 0 and {MAX_PAGINATION_OFFSET}'}), 400)
+
+    return limit, offset, None
 
 
 def _clean_str(value, max_len, default=''):

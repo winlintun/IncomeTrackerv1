@@ -1961,3 +1961,210 @@ class TestStaticAssets:
         res = client.get(path)
         assert res.status_code == 200
         assert len(res.data) > 0
+
+    def test_index_removes_duplicate_tailwind_v4(self, client):
+        html = client.get('/').get_data(as_text=True)
+        assert 'cdn.tailwindcss.com' in html
+        assert '@tailwindcss/browser@4' not in html
+        assert 'aria-live="polite"' in html
+
+    def test_app_css_font_and_dark_focus(self, client):
+        css = client.get('/static/css/app.css').get_data(as_text=True)
+        assert "'Plus Jakarta Sans'" in css
+        assert "'Plus+Jakarta+Sans'" not in css
+        assert 'html.dark .focus\\:bg-white:focus' in css
+
+    def test_app_js_routing_and_no_duplicate_notes(self, client):
+        js = client.get('/static/js/app.js').get_data(as_text=True)
+        assert 'function renderNotes(' not in js
+        assert 'window.history.pushState' in js
+        assert "window.addEventListener('popstate'" in js
+        assert 'window.deleteTarget' in js
+        assert 'window.generateResetCode' in js
+        assert 'createChart(' in js
+
+    def test_notes_page_theme_toggle_and_keepalive(self, auth_client):
+        html = auth_client.get('/notes').get_data(as_text=True)
+        assert 'toggleTheme()' in html
+        assert 'view=expenses' in html
+        js = auth_client.get('/static/js/notes.js').get_data(as_text=True)
+        assert 'keepalive: true' in js
+        assert 'captureSnapshot' in js
+
+
+class TestResetTokenPruning:
+    def test_expired_tokens_pruned_on_forgot_password(self, admin_client):
+        from datetime import timedelta
+        from models import PasswordResetToken
+        from validators import utcnow
+
+        with flask_app.app_context():
+            user = User.query.filter_by(role='admin').first()
+            admin_username = user.username
+            expired = PasswordResetToken(
+                user_id=user.id,
+                token='expired-token-hash-001',
+                expires_at=utcnow() - timedelta(minutes=5),
+                used=False,
+            )
+            valid = PasswordResetToken(
+                user_id=user.id,
+                token='valid-token-hash-001',
+                expires_at=utcnow() + timedelta(minutes=25),
+                used=False,
+            )
+            db.session.add_all([expired, valid])
+            db.session.commit()
+
+        res = admin_client.post('/api/auth/forgot-password', json={'username': admin_username})
+        assert res.status_code == 200
+        assert 'reset_token' in res.get_json()
+
+        with flask_app.app_context():
+            assert PasswordResetToken.query.filter_by(token='expired-token-hash-001').first() is None
+            remaining = PasswordResetToken.query.filter_by(token='valid-token-hash-001').first()
+            assert remaining is not None
+            assert remaining.used is True
+
+
+class TestTargetDeletion:
+    def test_delete_own_target(self, auth_client):
+        create = auth_client.post('/api/targets', json={'month': '2026-06', 'amount': 50000})
+        assert create.status_code == 200
+        target_id = create.get_json()['id']
+
+        res = auth_client.delete(f'/api/targets/{target_id}')
+        assert res.status_code == 200
+        assert res.get_json()['message'] == 'Target deleted'
+
+        listing = auth_client.get('/api/targets').get_json()
+        assert all(t['id'] != target_id for t in listing)
+
+    def test_delete_missing_target_returns_404(self, auth_client):
+        res = auth_client.delete('/api/targets/999999')
+        assert res.status_code == 404
+
+    def test_delete_other_users_target_returns_404(self, auth_client, client):
+        create = auth_client.post('/api/targets', json={'month': '2026-07', 'amount': 40000})
+        target_id = create.get_json()['id']
+
+        auth_client.post('/api/auth/logout')
+        client.post('/api/auth/register', json={'username': 'otheruser', 'password': 'password123'})
+        client.post('/api/auth/login', json={'username': 'otheruser', 'password': 'password123'})
+
+        res = client.delete(f'/api/targets/{target_id}')
+        assert res.status_code == 404
+
+    def test_delete_target_unauthenticated_returns_401(self, client):
+        res = client.delete('/api/targets/1')
+        assert res.status_code == 401
+
+
+class TestFilteringAndPagination:
+    def test_income_month_filter_and_pagination(self, auth_client, sample_job):
+        for date, amt in [
+            ('2026-04-01', 1000),
+            ('2026-04-02', 2000),
+            ('2026-04-03', 3000),
+            ('2026-05-01', 4000),
+        ]:
+            r = auth_client.post('/api/income', json={'job_id': sample_job['id'], 'date': date, 'amount': amt})
+            assert r.status_code == 201
+
+        full = auth_client.get('/api/income')
+        assert full.status_code == 200
+        assert len(full.get_json()) == 4
+        assert 'X-Total-Count' not in full.headers
+
+        filtered = auth_client.get('/api/income?month=2026-04')
+        assert filtered.status_code == 200
+        assert len(filtered.get_json()) == 3
+
+        paged = auth_client.get('/api/income?month=2026-04&limit=2&offset=1')
+        assert paged.status_code == 200
+        assert len(paged.get_json()) == 2
+        assert paged.headers.get('X-Total-Count') == '3'
+
+        assert auth_client.get('/api/income?month=bad').status_code == 400
+        assert auth_client.get('/api/income?limit=0').status_code == 400
+        assert auth_client.get('/api/income?offset=-1').status_code == 400
+        assert auth_client.get('/api/income?offset=999999999999999999999999').status_code == 400
+
+    def test_expenses_month_filter_and_pagination(self, auth_client):
+        for date, desc in [
+            ('2026-04-01', 'A'),
+            ('2026-04-02', 'B'),
+            ('2026-05-01', 'C'),
+        ]:
+            r = auth_client.post('/api/expenses', json={'date': date, 'amount': 100, 'description': desc})
+            assert r.status_code == 201
+
+        paged = auth_client.get('/api/expenses?month=2026-04&limit=1&offset=0')
+        assert paged.status_code == 200
+        assert len(paged.get_json()) == 1
+        assert paged.headers.get('X-Total-Count') == '2'
+        assert auth_client.get('/api/expenses?month=2026-13').status_code == 400
+        assert auth_client.get('/api/expenses?limit=abc').status_code == 400
+
+    def test_notes_month_filter_and_pagination(self, auth_client):
+        from datetime import datetime
+
+        for title in ['N1', 'N2', 'N3']:
+            r = auth_client.post('/api/notes', json={'title': title, 'content': 'body'})
+            assert r.status_code == 201
+
+        with flask_app.app_context():
+            notes = Note.query.order_by(Note.id.asc()).all()
+            notes[0].updated_at = datetime(2026, 3, 15, 10, 0, 0)
+            notes[1].updated_at = datetime(2026, 4, 10, 10, 0, 0)
+            notes[2].updated_at = datetime(2026, 4, 20, 10, 0, 0)
+            db.session.commit()
+
+        paged = auth_client.get('/api/notes?month=2026-04&limit=1&offset=1')
+        assert paged.status_code == 200
+        assert len(paged.get_json()) == 1
+        assert paged.headers.get('X-Total-Count') == '2'
+        assert auth_client.get('/api/notes?month=invalid').status_code == 400
+        assert auth_client.get('/api/notes?limit=9999').status_code == 400
+
+
+class TestAdminAnalyticsAndMonetaryPrecision:
+    def test_admin_stats_daily_trend_and_eager_user(self, admin_client):
+        from validators import utcnow
+
+        job_res = admin_client.post('/api/jobs', json={
+            'name': 'Admin Job', 'hourly_rate': 200, 'hours_per_day': 8, 'color': '#18181b'
+        })
+        assert job_res.status_code == 201
+        job_id = job_res.get_json()['id']
+
+        today_str = utcnow().date().strftime('%Y-%m-%d')
+        r = admin_client.post('/api/income', json={'job_id': job_id, 'date': today_str, 'amount': 123.45})
+        assert r.status_code == 201
+
+        res = admin_client.get('/api/admin/stats')
+        assert res.status_code == 200
+        data = res.get_json()
+        assert 'daily_trend' in data
+        assert len(data['daily_trend']) == 30
+        assert data['daily_trend'][-1]['date'] == today_str
+        assert data['daily_trend'][-1]['total'] == pytest.approx(123.45)
+        assert data['recent_activity'][0]['username'] == 'admin'
+        assert data['recent_activity'][0]['amount'] == pytest.approx(123.45)
+
+    def test_monetary_precision_and_overflow_rejected(self, auth_client):
+        job_res = auth_client.post('/api/jobs', json={
+            'name': 'Precise Job',
+            'hourly_rate': 123.45,
+            'hours_per_day': 8,
+            'color': '#10b981',
+        })
+        assert job_res.status_code == 201
+        assert job_res.get_json()['hourly_rate'] == pytest.approx(123.45)
+
+        overflow_res = auth_client.post('/api/expenses', json={
+            'date': '2026-04-09',
+            'amount': 999999999999.99,
+            'description': 'too big',
+        })
+        assert overflow_res.status_code == 400

@@ -1,40 +1,5 @@
 # AGENTS.md - Income Tracker (Flask)
 
-## Team Workflow
-
-You are the main implementer in a 3-agent team. Two CLI agents are available
-in this environment: `agy` (Antigravity CLI, planner) and `qodercli` (reviewer).
-Both are installed and authenticated.
-
-## Workflow for every task
-
-1. **PLAN (agy):** Before writing ANY code, run:
-   agy -p "Create an implementation plan for this task: <task>.
-   Output the plan as a numbered step list with exact files to create/modify.
-   Do not write code, only plan." --mode plan > /tmp/agy-plan.md
-   Read /tmp/agy-plan.md and follow it strictly.
-
-2. **IMPLEMENT (you):** Write the code according to the plan.
-
-3. **REVIEW (qodercli):** After implementing, run:
-   qodercli -p "Review the current uncommitted git diff for bugs,
-   security vulnerabilities, and performance issues.
-   List each issue with file, line, severity, and fix suggestion.
-   If no issues, output exactly: LGTM" > /tmp/qoder-review.md
-   (Use qodercli's headless/script mode flags — check `qodercli --help`.)
-
-4. **FIX LOOP:** If the review is not "LGTM":
-   a. Run agy again for a fix plan:
-      agy -p "Here are issues found in code review: $(cat /tmp/qoder-review.md).
-      Create a minimal fix plan (numbered steps, exact files)." --mode plan > /tmp/agy-fix.md
-   b. Implement the fixes.
-   c. Re-run the qodercli review.
-   d. Maximum 1 fix iterations. If still failing after 1, report to the user
-      with the remaining issues.
-
-5. Only report the task complete when qodercli outputs LGTM, or after
-   exhausting the fix loop with a clear summary.
-
 ## Quick Start
 
 ```bash

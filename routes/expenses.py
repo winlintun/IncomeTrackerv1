@@ -6,8 +6,10 @@ from models import Expense, ExpenseBudget, db
 from validators import (
     MAX_DESCRIPTION_LEN,
     VALID_EXPENSE_TYPES,
+    _as_float,
     _clean_str,
     _clean_tags,
+    _parse_pagination,
     _require_body,
     _valid_amount,
     _valid_date,
@@ -56,23 +58,48 @@ def manage_expenses():
         return jsonify({
             'id': expense.id,
             'date': expense.date,
-            'amount': expense.amount,
+            'amount': _as_float(expense.amount),
             'description': expense.description,
             'tags': expense.tags.split(',') if expense.tags else [],
             'expense_type': expense.expense_type,
             'created_at': expense.created_at.isoformat()
         }), 201
 
-    expenses = Expense.query.filter_by(user_id=current_user.id).order_by(Expense.date.desc()).all()
-    return jsonify([{
+    query = Expense.query.filter_by(user_id=current_user.id)
+    month_arg = request.args.get('month')
+    if month_arg is not None and month_arg != '':
+        month = _valid_month(month_arg)
+        if not month:
+            return jsonify({'error': 'month must be YYYY-MM'}), 400
+        query = query.filter(Expense.date.startswith(month))
+
+    limit, offset, page_error = _parse_pagination()
+    if page_error:
+        return page_error
+
+    total = None
+    if limit is not None or offset is not None:
+        total = query.count()
+
+    query = query.order_by(Expense.date.desc(), Expense.id.desc())
+    if offset is not None:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+
+    expenses = query.all()
+    resp = jsonify([{
         'id': e.id,
         'date': e.date,
-        'amount': e.amount,
+        'amount': _as_float(e.amount),
         'description': e.description,
         'tags': e.tags.split(',') if e.tags else [],
         'expense_type': e.expense_type,
         'created_at': e.created_at.isoformat()
     } for e in expenses])
+    if total is not None:
+        resp.headers['X-Total-Count'] = str(total)
+    return resp
 
 
 @expenses_bp.route('/api/expenses/<int:expense_id>', methods=['PUT', 'DELETE'])
@@ -110,7 +137,7 @@ def manage_expense_item(expense_id):
         return jsonify({
             'id': expense.id,
             'date': expense.date,
-            'amount': expense.amount,
+            'amount': _as_float(expense.amount),
             'description': expense.description,
             'tags': expense.tags.split(',') if expense.tags else [],
             'expense_type': expense.expense_type
@@ -126,7 +153,7 @@ def _serialize_budget(budget):
         'id': budget.id,
         'month': budget.month,
         'expense_type': budget.expense_type,
-        'limit_amount': budget.limit_amount
+        'limit_amount': _as_float(budget.limit_amount)
     }
 
 
@@ -222,18 +249,20 @@ def expense_stats():
         Expense.date.startswith(current_month)
     ).all()
 
-    monthly_total = sum(e.amount for e in expenses)
+    monthly_total = round(sum(_as_float(e.amount) for e in expenses), 2)
 
     by_type = {}
     for e in expenses:
-        by_type[e.expense_type] = by_type.get(e.expense_type, 0) + e.amount
+        amt = _as_float(e.amount)
+        by_type[e.expense_type] = round(by_type.get(e.expense_type, 0.0) + amt, 2)
 
     all_tags = {}
     for e in expenses:
+        amt = _as_float(e.amount)
         for tag in (e.tags.split(',') if e.tags else []):
             tag = tag.strip()
             if tag:
-                all_tags[tag] = all_tags.get(tag, 0) + e.amount
+                all_tags[tag] = round(all_tags.get(tag, 0.0) + amt, 2)
 
     budgets = {}
     budget_rows = ExpenseBudget.query.filter_by(
@@ -241,7 +270,7 @@ def expense_stats():
     ).all()
     budget_by_type = {b.expense_type: b for b in budget_rows}
     for expense_type in VALID_EXPENSE_TYPES:
-        spent = by_type.get(expense_type, 0)
+        spent = _as_float(by_type.get(expense_type, 0.0))
         budget = budget_by_type.get(expense_type)
         if budget is None:
             budgets[expense_type] = {
@@ -253,7 +282,7 @@ def expense_stats():
                 'status': 'unset'
             }
         else:
-            limit = budget.limit_amount
+            limit = _as_float(budget.limit_amount)
             percent = (spent / limit * 100) if limit > 0 else None
             if percent is not None and not math.isfinite(percent):
                 percent = None
@@ -261,7 +290,7 @@ def expense_stats():
                 'id': budget.id,
                 'limit_amount': limit,
                 'spent': spent,
-                'remaining': limit - spent,
+                'remaining': round(limit - spent, 2),
                 'percent': percent,
                 'status': _budget_status(spent, limit)
             }

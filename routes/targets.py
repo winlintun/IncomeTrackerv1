@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 from sqlalchemy.exc import IntegrityError
 from models import Target, db
-from validators import _require_body, _valid_amount, _valid_month
+from validators import _as_float, _require_body, _valid_amount, _valid_month
 
 targets_bp = Blueprint('targets', __name__)
 
@@ -56,7 +56,7 @@ def manage_targets():
         return jsonify({
             'id': target.id,
             'month': target.month,
-            'amount': target.amount,
+            'amount': _as_float(target.amount),
             'work_days_per_week': target.work_days_per_week
         })
 
@@ -64,6 +64,17 @@ def manage_targets():
     return jsonify([{
         'id': t.id,
         'month': t.month,
-        'amount': t.amount,
+        'amount': _as_float(t.amount),
         'work_days_per_week': t.work_days_per_week
     } for t in targets])
+
+
+@targets_bp.route('/api/targets/<int:target_id>', methods=['DELETE'])
+@login_required
+def delete_target(target_id):
+    target = Target.query.filter_by(id=target_id, user_id=current_user.id).first()
+    if not target:
+        return jsonify({'error': 'Target not found'}), 404
+    db.session.delete(target)
+    db.session.commit()
+    return jsonify({'message': 'Target deleted'})

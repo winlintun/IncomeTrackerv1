@@ -158,6 +158,32 @@ def _migrate_expense_budget_unique_constraint():
         print(f'Could not create expense_budget unique index: {e}')
 
 
+def _migrate_monetary_columns_postgres():
+    targets = [
+        ('job', 'hourly_rate'),
+        ('income_record', 'amount'),
+        ('target', 'amount'),
+        ('expense', 'amount'),
+        ('expense_budget', 'limit_amount'),
+    ]
+    for table_name, col_name in targets:
+        try:
+            row = db.session.execute(text("""
+                SELECT data_type FROM information_schema.columns
+                WHERE table_schema = current_schema() AND table_name = :t AND column_name = :c
+            """), {'t': table_name, 'c': col_name}).fetchone()
+            if row and row[0] in ('double precision', 'real'):
+                db.session.execute(text(
+                    f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" '
+                    f'TYPE NUMERIC(12, 2) USING ROUND("{col_name}"::numeric, 2)'
+                ))
+                db.session.commit()
+                print(f'Migrated {table_name}.{col_name} to NUMERIC(12, 2).')
+        except Exception as e:
+            db.session.rollback()
+            print(f'Could not migrate {table_name}.{col_name} to NUMERIC(12, 2): {e}')
+
+
 def _seed_bootstrap_flag():
     existing_users = db.session.execute(text('SELECT COUNT(*) FROM "user"')).scalar() or 0
     marker = Setting.query.filter_by(key='admin_bootstrap_done').first()
@@ -197,6 +223,7 @@ def init_db_with_retry(app, retries=5, delay=3):
                     _migrate_user_normalized_postgres()
                     _migrate_target_unique_constraint()
                     _migrate_expense_budget_unique_constraint()
+                    _migrate_monetary_columns_postgres()
                     _seed_bootstrap_flag()
                 elif 'sqlite' in db_uri:
                     result = db.session.execute(text("PRAGMA table_list"))

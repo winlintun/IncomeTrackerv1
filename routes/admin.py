@@ -1,7 +1,9 @@
+from datetime import timedelta
 from flask import Blueprint, jsonify, request
 from flask_login import current_user
+from sqlalchemy.orm import joinedload
 from models import IncomeRecord, Job, Note, PasswordResetToken, User, db
-from validators import VALID_ROLES, _require_body, admin_required
+from validators import VALID_ROLES, _as_float, _require_body, admin_required, utcnow
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -63,18 +65,37 @@ def admin_stats():
     total_users = User.query.count()
     total_jobs = Job.query.count()
     total_records = IncomeRecord.query.count()
-    total_income = db.session.query(db.func.sum(IncomeRecord.amount)).scalar() or 0
+    total_income = _as_float(db.session.query(db.func.sum(IncomeRecord.amount)).scalar() or 0)
 
-    recent_records = IncomeRecord.query.order_by(IncomeRecord.created_at.desc()).limit(10).all()
+    recent_records = (
+        IncomeRecord.query
+        .options(joinedload(IncomeRecord.user))
+        .order_by(IncomeRecord.created_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    today = utcnow().date()
+    date_window = [(today - timedelta(days=offset)).strftime('%Y-%m-%d') for offset in range(29, -1, -1)]
+    start_date, end_date = date_window[0], date_window[-1]
+    trend_rows = (
+        db.session.query(IncomeRecord.date, db.func.sum(IncomeRecord.amount))
+        .filter(IncomeRecord.date >= start_date, IncomeRecord.date <= end_date)
+        .group_by(IncomeRecord.date)
+        .all()
+    )
+    totals_by_date = {row_date: _as_float(row_total) for row_date, row_total in trend_rows}
+    daily_trend = [{'date': day_str, 'total': totals_by_date.get(day_str, 0.0)} for day_str in date_window]
 
     return jsonify({
         'total_users': total_users,
         'total_jobs': total_jobs,
         'total_records': total_records,
         'total_income': total_income,
+        'daily_trend': daily_trend,
         'recent_activity': [{
             'id': r.id,
-            'amount': r.amount,
+            'amount': _as_float(r.amount),
             'date': r.date,
             'job_name': r.job_name,
             'username': r.user.username if r.user else 'Unknown'

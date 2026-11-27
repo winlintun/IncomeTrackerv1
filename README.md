@@ -4,15 +4,16 @@ A full-stack web application built with Flask and PostgreSQL to help users track
 
 ## Features
 
-*   **User Authentication**: Secure registration and login using `Flask-Login` and `Flask-Bcrypt`.
-*   **Password Reset**: Forgot-password flow with time-limited, single-use reset codes (30 minutes; printed to server logs or retrievable by the admin — no email dependency).
-*   **Dashboard**: View total income, total expenses, and net balance.
-*   **Transaction Management**: Add, edit, and delete income and expense records.
-*   **Notes**: A separate notes page for quick ideas and reminders.
-*   **Job Management**: Track jobs with hourly rates and hours per day; income records can be auto-calculated from them.
-*   **Admin Panel**: A dedicated dashboard for the admin to view all users and manage their roles.
-*   **Single Admin Rule**: The system strictly enforces that only one user can hold the `admin` role at any given time.
-*   **PostgreSQL Database**: Robust data storage using PostgreSQL and `Flask-SQLAlchemy` (SQLite fallback in development).
+*   **User Authentication & Profile**: Secure registration, login, CSRF protection, rate limiting, profile management, and password change using `Flask-Login` and `Flask-Bcrypt`.
+*   **Password Reset**: Time-limited (30-minute), single-use reset codes with automatic expired-token pruning and one-click reset-code generation in the Admin Panel (no email dependency).
+*   **Dashboard & Monthly Summary**: Track monthly earnings, expenses, net balance, daily average, weekly activity, job distribution, and multi-chart monthly breakdowns with deep-linked URL routing (`/?view=...`).
+*   **Income & Job Management**: Manage job profiles (hourly rate, daily hours, color) with calendar-based income tracking, work-pace estimation, and quick logging.
+*   **Monthly Targets**: Set, track, and delete monthly income targets with visual progress tracking.
+*   **Expenses & Monthly Budgets**: Categorized and tagged expense tracking with per-category monthly spending limits and budget alerts.
+*   **Notes (`/notes`)**: Dedicated notes workspace with search, pinning, reliable autosave, and synced light/dark theme toggle.
+*   **Admin Panel**: System-wide stats, 30-day income trend chart, recent activity, user role management (strict single-admin enforcement), and password reset code generation.
+*   **Filtering & Pagination**: Optional `month`, `limit`, and `offset` query parameters (with `X-Total-Count` header) on `/api/income`, `/api/expenses`, and `/api/notes`.
+*   **PostgreSQL Database**: Exact `NUMERIC(12, 2)` monetary storage using PostgreSQL and `Flask-SQLAlchemy` (SQLite fallback in development).
 
 ## Tech Stack
 
@@ -136,9 +137,14 @@ This means your hosting provider (like Koyeb) requires you to use their specific
 
 ## Project Structure
 
-*   `app.py`: The main Flask application, routes, and API endpoints.
-*   `models.py`: SQLAlchemy database models (`User` and `Transaction`).
-*   `templates/index.html`: The single-page frontend application.
+*   `app.py`: Flask app configuration, security headers, CSRF enforcement, error handlers, and blueprint registration.
+*   `models.py`: SQLAlchemy models (`User`, `Job`, `IncomeRecord`, `Target`, `Note`, `Expense`, `ExpenseBudget`, `PasswordResetToken`, `Setting`).
+*   `routes/`: Modular Flask blueprints (`auth.py`, `jobs.py`, `income.py`, `targets.py`, `expenses.py`, `notes.py`, `admin.py`, `pages.py`).
+*   `db_init.py`: Startup table initialization and idempotent schema migrations.
+*   `extensions.py`, `security.py`, `validators.py`: Shared extensions, CSRF/rate-limiting helpers, and input/pagination validators.
+*   `templates/`: HTML templates (`index.html` SPA shell and `note.html` notes workspace).
+*   `static/`: Frontend CSS (`css/app.css`, `css/notes.css`) and JavaScript (`js/app.js`, `js/notes.js`, `js/csrf.js`).
+*   `tests/test_app.py`: Automated `pytest` suite running against in-memory SQLite.
 *   `requirements.txt`: Python dependencies.
 *   `Procfile`: Command to run the web process in production.
 *   `Dockerfile`: Container image definition (Python 3.12-slim, non-root, Gunicorn).

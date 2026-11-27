@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 from models import IncomeRecord, Job, db
-from validators import MAX_JOB_NAME_LEN, _clean_color, _clean_str, _require_body, _valid_amount
+from validators import MAX_JOB_NAME_LEN, _as_float, _clean_color, _clean_str, _require_body, _valid_amount
 
 jobs_bp = Blueprint('jobs', __name__)
 
@@ -37,7 +37,7 @@ def manage_jobs():
         return jsonify({
             'id': new_job.id,
             'name': new_job.name,
-            'hourly_rate': new_job.hourly_rate,
+            'hourly_rate': _as_float(new_job.hourly_rate),
             'hours_per_day': new_job.hours_per_day,
             'color': new_job.color
         }), 201
@@ -46,7 +46,7 @@ def manage_jobs():
     return jsonify([{
         'id': j.id,
         'name': j.name,
-        'hourly_rate': j.hourly_rate,
+        'hourly_rate': _as_float(j.hourly_rate),
         'hours_per_day': j.hours_per_day,
         'color': j.color
     } for j in jobs])
@@ -88,7 +88,7 @@ def manage_job_item(job_id):
         return jsonify({
             'id': job.id,
             'name': job.name,
-            'hourly_rate': job.hourly_rate,
+            'hourly_rate': _as_float(job.hourly_rate),
             'hours_per_day': job.hours_per_day,
             'color': job.color
         })

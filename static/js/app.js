@@ -22,6 +22,105 @@
         // restores the original value.
         const escHandlerArg = (s = '') => escAttr(escJs(s));
         const savedTheme = (() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })();
+        const VALID_VIEWS = new Set(['dashboard', 'income', 'expenses', 'jobs', 'targets', 'summary', 'admin', 'profile']);
+        const activeCharts = new Map();
+
+        function destroyAllCharts() {
+            for (const chart of activeCharts.values()) {
+                try { chart.destroy(); } catch (e) {}
+            }
+            activeCharts.clear();
+        }
+
+        function createChart(canvasId, config) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return null;
+            const prev = activeCharts.get(canvasId);
+            if (prev) {
+                try { prev.destroy(); } catch (e) {}
+                activeCharts.delete(canvasId);
+            }
+            const chart = new Chart(canvas, config);
+            activeCharts.set(canvasId, chart);
+            return chart;
+        }
+
+        function resolveView(view) {
+            if (view === 'notes') return 'notes';
+            if (!VALID_VIEWS.has(view)) return 'dashboard';
+            if (view === 'admin' && (!state.user || state.user.role !== 'admin')) return 'dashboard';
+            return view;
+        }
+
+        function viewToUrl(view) {
+            return view === 'dashboard' ? '/' : `/?view=${encodeURIComponent(view)}`;
+        }
+
+        function getMonthDayStats(ym) {
+            const [year, month] = ym.split('-').map(Number);
+            const daysInMonth = new Date(year, month, 0).getDate();
+            const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+            const todayYM = localYM();
+            if (ym === todayYM) {
+                const daysElapsed = new Date().getDate();
+                return { divisor: daysElapsed, label: `the last ${daysElapsed} days of this month` };
+            }
+            if (ym < todayYM) {
+                return { divisor: daysInMonth, label: `all ${daysInMonth} days of ${monthName}` };
+            }
+            return { divisor: daysInMonth, label: `${monthName} (${daysInMonth} days)` };
+        }
+
+        function getWeeklyWindowForMonth(ym) {
+            const [year, month] = ym.split('-').map(Number);
+            const daysInMonth = new Date(year, month, 0).getDate();
+            const todayYM = localYM();
+            if (ym === todayYM) {
+                const days = [...Array(7)].map((_, i) => {
+                    const d = new Date();
+                    d.setDate(d.getDate() - i);
+                    return localYMD(d);
+                }).reverse();
+                return { days, subtitle: 'Last 7 days' };
+            }
+            if (ym < todayYM) {
+                const startDay = Math.max(1, daysInMonth - 6);
+                const days = [];
+                for (let day = startDay; day <= daysInMonth; day++) {
+                    days.push(`${year}-${pad2(month)}-${pad2(day)}`);
+                }
+                return { days, subtitle: `Last 7 days of ${ym}` };
+            }
+            const days = [];
+            for (let day = 1; day <= Math.min(7, daysInMonth); day++) {
+                days.push(`${year}-${pad2(month)}-${pad2(day)}`);
+            }
+            return { days, subtitle: `First 7 days of ${ym}` };
+        }
+
+        function closeActiveModal() {
+            const modal = document.getElementById('modal-container');
+            if (modal && modal.innerHTML) modal.innerHTML = '';
+            const expModal = document.getElementById('expense-modal-container');
+            if (expModal && expModal.innerHTML) expModal.innerHTML = '';
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeActiveModal();
+        });
+
+        window.addEventListener('popstate', (event) => {
+            if (!state.user) return;
+            const raw = (event.state && event.state.view) || new URLSearchParams(window.location.search).get('view') || 'dashboard';
+            const resolved = resolveView(raw);
+            if (resolved === 'notes') {
+                window.location.href = '/notes';
+                return;
+            }
+            state.currentView = resolved;
+            state.mobileMenuOpen = false;
+            render();
+        });
 
         // Basic SPA Router and State Management
         let state = {
@@ -50,15 +149,22 @@
         }
 
         async function init() {
-            const res = await fetch('/api/auth/me');
-            state.user = await res.json();
-            if (state.user) {
-                await fetchData();
-                const viewParam = new URLSearchParams(window.location.search).get('view');
-                if (viewParam) {
-                    state.currentView = viewParam;
-                    window.history.replaceState({}, '', '/');
+            try {
+                const res = await fetch('/api/auth/me');
+                state.user = res.ok ? await res.json() : null;
+                if (state.user) {
+                    await fetchData();
+                    const viewParam = new URLSearchParams(window.location.search).get('view');
+                    if (viewParam === 'notes') {
+                        window.location.replace('/notes');
+                        return;
+                    }
+                    state.currentView = resolveView(viewParam || 'dashboard');
+                    window.history.replaceState({ view: state.currentView }, '', viewToUrl(state.currentView));
                 }
+            } catch (e) {
+                state.user = null;
+                showToast('Unable to connect to server', 'error');
             }
             state.loading = false;
             render();
@@ -190,6 +296,8 @@
                 }
                 if (res.ok) {
                     state.user = await res.json();
+                    state.currentView = resolveView(state.currentView);
+                    window.history.replaceState({ view: state.currentView }, '', viewToUrl(state.currentView));
                     await fetchData();
                     render();
                 } else if (res.status === 401) {
@@ -468,21 +576,21 @@
                     </div>
 
                     <div class="flex items-center gap-2 md:gap-4">
-                        <button onclick="window.toggleTheme()" title="Toggle light/dark theme" class="w-10 h-10 rounded-xl border border-black/5 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
+                        <button type="button" onclick="window.toggleTheme()" title="Toggle light/dark theme" aria-label="Toggle light or dark theme" class="w-10 h-10 rounded-xl border border-black/5 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
                             <i data-lucide="${state.theme === 'dark' ? 'sun' : 'moon'}"></i>
                         </button>
-                        <button onclick="window.setView('profile')" title="Account & Profile" class="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-black/5 hover:bg-zinc-50 transition-all ${state.currentView === 'profile' ? 'bg-zinc-100' : ''}">
+                        <button type="button" onclick="window.setView('profile')" title="Account & Profile" aria-label="Account and Profile" class="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-black/5 hover:bg-zinc-50 transition-all ${state.currentView === 'profile' ? 'bg-zinc-100' : ''}">
                             <i data-lucide="user" class="w-4 h-4 text-zinc-500"></i>
                             <div class="text-right hidden sm:block">
                                 <p class="text-sm font-bold text-zinc-900">${escHtml(state.user.username)}</p>
                                 <p class="text-[10px] text-zinc-400 uppercase font-bold tracking-widest">${escHtml(state.user.role)}</p>
                             </div>
                         </button>
-                        <button onclick="window.logout()" class="w-10 h-10 rounded-xl border border-black/5 flex items-center justify-center text-zinc-400 hover:text-red-500 hover:bg-red-50 transition-all">
+                        <button type="button" onclick="window.logout()" title="Sign out" aria-label="Sign out" class="w-10 h-10 rounded-xl border border-black/5 flex items-center justify-center text-zinc-400 hover:text-red-500 hover:bg-red-50 transition-all">
                             <i data-lucide="log-out"></i>
                         </button>
                         <!-- Mobile Menu Toggle -->
-                        <button onclick="window.toggleMobileMenu()" class="lg:hidden w-10 h-10 rounded-xl bg-zinc-900 text-white flex items-center justify-center">
+                        <button type="button" onclick="window.toggleMobileMenu()" aria-label="Toggle navigation menu" class="lg:hidden w-10 h-10 rounded-xl bg-zinc-900 text-white flex items-center justify-center">
                             <i data-lucide="${state.mobileMenuOpen ? 'x' : 'menu'}"></i>
                         </button>
                     </div>
@@ -528,7 +636,7 @@
                     </div>
                 ` : ''}
 
-                <div id="view-content"></div>
+                <main id="view-content"></main>
             `;
             lucide.createIcons();
             renderView();
@@ -539,9 +647,21 @@
             render();
         };
 
-        window.setView = (view) => {
-            state.currentView = view;
+        window.setView = (view, options = { push: true }) => {
+            const resolved = resolveView(view);
+            if (resolved === 'notes') {
+                window.location.href = '/notes';
+                return;
+            }
+            const changed = state.currentView !== resolved;
+            state.currentView = resolved;
             state.mobileMenuOpen = false;
+            if (options && options.push !== false) {
+                const targetUrl = viewToUrl(resolved);
+                if (changed || window.location.pathname + window.location.search !== targetUrl) {
+                    window.history.pushState({ view: resolved }, '', targetUrl);
+                }
+            }
             render();
         };
 
@@ -561,11 +681,11 @@
             const modal = document.getElementById('modal-container');
             const today = localYMD();
             modal.innerHTML = `
-                <div class="fixed inset-0 bg-zinc-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4">
+                <div class="fixed inset-0 bg-zinc-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label="Quick Log Income">
                     <div class="bg-white p-10 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-black/5 animate-slide">
                         <div class="flex items-center justify-between mb-8">
                             <h3 class="text-3xl font-extrabold tracking-tight">Quick Log</h3>
-                            <button onclick="this.closest('.fixed').remove()" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
+                            <button type="button" onclick="this.closest('.fixed').remove()" aria-label="Close modal" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
                                 <i data-lucide="x" class="w-5 h-5"></i>
                             </button>
                         </div>
@@ -610,7 +730,7 @@
                     body: JSON.stringify(data)
                 });
                 if (res.ok) {
-                    document.querySelector('.fixed').remove();
+                    closeActiveModal();
                     await fetchData();
                     render();
                     showToast('Income logged successfully!');
@@ -635,11 +755,15 @@
         window.logout = async () => {
             await fetch('/api/auth/logout', { method: 'POST' });
             if (window.refreshCsrfToken) await window.refreshCsrfToken();
+            destroyAllCharts();
             state.user = null;
+            state.currentView = 'dashboard';
+            window.history.replaceState({ view: 'dashboard' }, '', '/');
             render();
         };
 
         function renderView() {
+            destroyAllCharts();
             const container = document.getElementById('view-content');
             if (state.currentView === 'dashboard') renderDashboard(container);
             else if (state.currentView === 'jobs') renderJobs(container);
@@ -647,7 +771,6 @@
             else if (state.currentView === 'targets') renderTargets(container);
             else if (state.currentView === 'summary') renderSummary(container);
             else if (state.currentView === 'admin') renderAdmin(container);
-            else if (state.currentView === 'notes') renderNotes(container);
             else if (state.currentView === 'expenses') renderExpenses(container);
             else if (state.currentView === 'profile') renderProfile(container);
         }
@@ -658,26 +781,25 @@
                 .filter(i => i.date.startsWith(currentMonth))
                 .reduce((sum, i) => sum + i.amount, 0);
             const target = state.targets.find(t => t.month === currentMonth)?.amount || 0;
-            const progress = target > 0 ? (monthlyIncome / target) * 100 : 0;
-            const exceeded = monthlyIncome > target ? monthlyIncome - target : 0;
+            const hasTarget = target > 0;
+            const progress = hasTarget ? (monthlyIncome / target) * 100 : 0;
+            const achieved = hasTarget && monthlyIncome >= target;
+            const exceeded = hasTarget && monthlyIncome > target ? monthlyIncome - target : 0;
             
-            const [year, month] = currentMonth.split('-');
+            const [year, month] = currentMonth.split('-').map(Number);
             const monthDate = new Date(year, month - 1);
             const monthName = monthDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+            const dayStats = getMonthDayStats(currentMonth);
 
-            // Expensive
+            // Expenses
             const monthlyExpenses = state.expenses
                 .filter(e => e.date.startsWith(currentMonth))
                 .reduce((sum, e) => sum + e.amount, 0);
             const netBalance = monthlyIncome - monthlyExpenses;
 
-
-            // Weekly Activity Data
-            const last7Days = [...Array(7)].map((_, i) => {
-                const d = new Date();
-                d.setDate(d.getDate() - i);
-                return localYMD(d);
-            }).reverse();
+            // Weekly Activity Data scoped to selectedMonth
+            const weeklyWindow = getWeeklyWindowForMonth(currentMonth);
+            const last7Days = weeklyWindow.days;
 
             const weeklyData = last7Days.map(date => {
                 return state.income
@@ -685,25 +807,35 @@
                     .reduce((sum, i) => sum + i.amount, 0);
             });
 
+            const jobTotals = state.jobs.map(job => {
+                return {
+                    name: job.name,
+                    color: job.color,
+                    total: state.income
+                        .filter(i => i.job_id === job.id && i.date.startsWith(currentMonth))
+                        .reduce((sum, i) => sum + i.amount, 0)
+                };
+            }).filter(j => j.total > 0);
+
             container.innerHTML = `
                 <div class="animate-slide space-y-6 md:space-y-8">
                     <!-- Quick Actions Bar -->
                     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <!-- Month Navigation -->
                         <div class="flex items-center gap-2 bg-white p-2 rounded-2xl border border-black/5 shadow-sm">
-                            <button onclick="window.changeMonth(-1)" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-all">
+                            <button type="button" onclick="window.changeMonth(-1)" aria-label="Previous month" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-all">
                                 <i data-lucide="chevron-left" class="w-5 h-5"></i>
                             </button>
                             <span class="px-4 py-2 font-bold text-zinc-900 min-w-[180px] text-center">${monthName}</span>
-                            <button onclick="window.changeMonth(1)" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-all">
+                            <button type="button" onclick="window.changeMonth(1)" aria-label="Next month" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-all">
                                 <i data-lucide="chevron-right" class="w-5 h-5"></i>
                             </button>
-                            <button onclick="window.changeMonth(0)" class="px-4 py-2 rounded-xl bg-zinc-900 text-white text-xs font-bold hover:bg-zinc-800 transition-all ml-2">
+                            <button type="button" onclick="window.changeMonth(0)" class="px-4 py-2 rounded-xl bg-zinc-900 text-white text-xs font-bold hover:bg-zinc-800 transition-all ml-2">
                                 Today
                             </button>
                         </div>
                         <!-- Quick Log Button -->
-                        <button onclick="window.showQuickLogModal()" class="bg-emerald-500 text-white px-8 py-4 rounded-2xl font-bold hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100 flex items-center gap-2">
+                        <button type="button" onclick="window.showQuickLogModal()" class="bg-emerald-500 text-white px-8 py-4 rounded-2xl font-bold hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100 flex items-center gap-2">
                             <i data-lucide="plus-circle" class="w-5 h-5"></i>
                             <span>Quick Log Income</span>
                         </button>
@@ -725,16 +857,21 @@
 
                             <div class="space-y-4 md:space-y-6">
                                 <div class="flex justify-between text-xs font-bold uppercase tracking-wider">
-                                    <span class="${monthlyIncome >= target ? 'text-emerald-500' : 'text-zinc-400'}">
-                                        ${monthlyIncome >= target ? 'Target Achieved!' : 'Progress'}
+                                    <span class="${achieved ? 'text-emerald-500' : 'text-zinc-400'}">
+                                        ${!hasTarget ? 'No Target Set' : achieved ? 'Target Achieved!' : 'Progress'}
                                     </span>
-                                    <span class="text-zinc-900">${progress.toFixed(1)}%</span>
+                                    <span class="text-zinc-900">${hasTarget ? progress.toFixed(1) + '%' : '—'}</span>
                                 </div>
                                 <div class="h-4 md:h-6 bg-zinc-50 rounded-2xl overflow-hidden p-1 border border-zinc-100">
-                                    <div class="h-full rounded-xl transition-all duration-1000 ${monthlyIncome >= target ? 'bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)]' : 'bg-zinc-900'}" style="width: ${Math.min(progress, 100)}%"></div>
+                                    <div class="h-full rounded-xl transition-all duration-1000 ${achieved ? 'bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)]' : 'bg-zinc-900'}" style="width: ${hasTarget ? Math.min(progress, 100) : 0}%"></div>
                                 </div>
                                 
-                                ${exceeded > 0 ? `
+                                ${!hasTarget ? `
+                                    <div class="flex flex-col sm:flex-row justify-between sm:items-center text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-1 gap-2">
+                                        <span>No monthly target set for ${monthName}</span>
+                                        <button type="button" onclick="window.setView('targets')" class="text-emerald-600 hover:underline text-left sm:text-right">Set Target</button>
+                                    </div>
+                                ` : exceeded > 0 ? `
                                     <div class="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 flex items-center justify-between animate-pulse">
                                         <div class="flex items-center gap-3 text-emerald-700">
                                             <i data-lucide="sparkles" class="w-4 h-4 md:w-5 md:h-5"></i>
@@ -759,10 +896,10 @@
                                     <i data-lucide="trending-up" class="text-emerald-400"></i>
                                 </div>
                                 <h3 class="text-zinc-400 text-[10px] font-bold uppercase tracking-[0.2em] mb-2">Daily Average</h3>
-                                <p class="text-4xl md:text-5xl font-black tracking-tighter">NTD ${(monthlyIncome / new Date().getDate()).toFixed(0)}</p>
+                                <p class="text-4xl md:text-5xl font-black tracking-tighter">NTD ${(monthlyIncome / dayStats.divisor).toFixed(0)}</p>
                             </div>
                             <div class="mt-6 md:mt-8 pt-6 md:pt-8 border-t border-white/10">
-                                <p class="text-[10px] md:text-xs font-medium text-zinc-500 leading-relaxed">Based on your activity over the last ${new Date().getDate()} days of this month.</p>
+                                <p class="text-[10px] md:text-xs font-medium text-zinc-500 leading-relaxed">Based on your activity over ${dayStats.label}.</p>
                             </div>
                         </div>
                     </div>
@@ -771,7 +908,10 @@
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
                         <div class="bg-white p-6 md:p-10 rounded-[2.5rem] border border-black/5 shadow-sm">
                             <div class="flex justify-between items-center mb-8 md:mb-10">
-                                <h3 class="text-lg md:text-xl font-extrabold tracking-tight">Weekly Activity</h3>
+                                <div>
+                                    <h3 class="text-lg md:text-xl font-extrabold tracking-tight">Weekly Activity</h3>
+                                    <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mt-1">${weeklyWindow.subtitle}</p>
+                                </div>
                                 <div class="flex items-center gap-2">
                                     <span class="w-2 h-2 md:w-3 md:h-3 bg-zinc-900 rounded-full"></span>
                                     <span class="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Earnings</span>
@@ -786,11 +926,16 @@
                             <div class="flex justify-between items-center mb-8 md:mb-10">
                                 <h3 class="text-lg md:text-xl font-extrabold tracking-tight">Income by Job</h3>
                                 <div class="flex items-center gap-4">
-                                    <button class="text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-zinc-900 transition-colors">View All</button>
+                                    <button type="button" onclick="window.setView('summary')" class="text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-zinc-900 transition-colors">View All</button>
                                 </div>
                             </div>
                             <div class="h-[250px] md:h-[300px]">
-                                <canvas id="jobChart"></canvas>
+                                ${jobTotals.length === 0
+                                    ? `<div class="h-full flex flex-col items-center justify-center text-center text-zinc-400 gap-2">
+                                        <i data-lucide="pie-chart" class="w-8 h-8 opacity-40"></i>
+                                        <p class="text-sm font-medium">No income recorded for ${monthName}</p>
+                                    </div>`
+                                    : `<canvas id="jobChart"></canvas>`}
                             </div>
                         </div>
                     </div>
@@ -810,11 +955,12 @@
                         </div>
                     </div>
                 </div>
+                <div id="modal-container"></div>
             `;
             lucide.createIcons();
 
             // Weekly Activity Chart (Line)
-            new Chart(document.getElementById('weeklyChart'), {
+            createChart('weeklyChart', {
                 type: 'line',
                 data: {
                     labels: last7Days.map(d => d.slice(5)),
@@ -843,45 +989,36 @@
                 }
             });
 
-            // Job Distribution Chart (Doughnut)
-            const jobTotals = state.jobs.map(job => {
-                return {
-                    name: job.name,
-                    color: job.color,
-                    total: state.income
-                        .filter(i => i.job_id === job.id && i.date.startsWith(currentMonth))
-                        .reduce((sum, i) => sum + i.amount, 0)
-                };
-            }).filter(j => j.total > 0);
-
-            new Chart(document.getElementById('jobChart'), {
-                type: 'doughnut',
-                data: {
-                    labels: jobTotals.map(j => j.name),
-                    datasets: [{
-                        data: jobTotals.map(j => j.total),
-                        backgroundColor: jobTotals.map(j => j.color),
-                        borderWidth: 0,
-                        hoverOffset: 20
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    cutout: '75%',
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
-                                padding: 20,
-                                usePointStyle: true,
-                                color: chartColors(),
-                                font: { weight: 'bold', size: 11 }
+            if (jobTotals.length > 0) {
+                createChart('jobChart', {
+                    type: 'doughnut',
+                    data: {
+                        labels: jobTotals.map(j => j.name),
+                        datasets: [{
+                            data: jobTotals.map(j => j.total),
+                            backgroundColor: jobTotals.map(j => j.color),
+                            borderWidth: 0,
+                            hoverOffset: 20
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '75%',
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                                labels: {
+                                    padding: 20,
+                                    usePointStyle: true,
+                                    color: chartColors(),
+                                    font: { weight: 'bold', size: 11 }
+                                }
                             }
                         }
                     }
-                }
-            });
+                });
+            }
         }
 
         // Add more view renders as needed...
@@ -899,7 +1036,16 @@
                         </button>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        ${state.jobs.map(job => {
+                        ${state.jobs.length === 0 ? `
+                            <div class="col-span-full bg-white p-12 rounded-[2.5rem] border border-black/5 shadow-sm text-center">
+                                <div class="w-14 h-14 mx-auto mb-4 rounded-2xl bg-zinc-50 flex items-center justify-center text-zinc-400">
+                                    <i data-lucide="briefcase" class="w-6 h-6"></i>
+                                </div>
+                                <h3 class="text-lg font-extrabold text-zinc-900 mb-1">No job profiles yet</h3>
+                                <p class="text-sm text-zinc-400 mb-6">Add your first job to start tracking income automatically.</p>
+                                <button type="button" onclick="window.showJobModal()" class="bg-zinc-900 text-white px-6 py-3 rounded-2xl text-sm font-bold hover:bg-zinc-800 transition-all">Add New Job</button>
+                            </div>
+                        ` : state.jobs.map(job => {
                             const totalEarned = state.income
                                 .filter(i => i.job_id === job.id)
                                 .reduce((sum, i) => sum + i.amount, 0);
@@ -914,10 +1060,10 @@
                                             <i data-lucide="briefcase" class="w-6 h-6"></i>
                                         </div>
                                         <div class="flex gap-2">
-                                            <button onclick="window.showJobModal(${escHandlerArg(job.id)})" class="w-8 h-8 rounded-lg bg-zinc-50 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 flex items-center justify-center transition-all">
+                                            <button type="button" onclick="window.showJobModal(${escHandlerArg(job.id)})" aria-label="Edit job ${escAttr(job.name)}" class="w-8 h-8 rounded-lg bg-zinc-50 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 flex items-center justify-center transition-all">
                                                 <i data-lucide="edit-3" class="w-4 h-4"></i>
                                             </button>
-                                            <button onclick="window.deleteJob(${Number(job.id)})" class="w-8 h-8 rounded-lg bg-zinc-50 text-zinc-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all">
+                                            <button type="button" onclick="window.deleteJob(${Number(job.id)})" aria-label="Delete job ${escAttr(job.name)}" class="w-8 h-8 rounded-lg bg-zinc-50 text-zinc-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all">
                                                 <i data-lucide="trash-2" class="w-4 h-4"></i>
                                             </button>
                                         </div>
@@ -1112,7 +1258,12 @@
                             </div>
                             <div id="incomeTableContainer" class="flex-1 overflow-y-auto max-h-[600px] transition-all duration-500">
                                 <div class="divide-y divide-zinc-100">
-                                    ${state.income.slice().sort((a,b) => b.date.localeCompare(a.date)).map(record => {
+                                    ${state.income.length === 0 ? `
+                                        <div class="p-10 text-center text-zinc-400">
+                                            <p class="text-sm font-medium">No income records yet.</p>
+                                            <p class="text-xs mt-1">Click a day on the calendar to log your first entry.</p>
+                                        </div>
+                                    ` : state.income.slice().sort((a,b) => b.date.localeCompare(a.date)).map(record => {
                                         const job = state.jobs.find(j => j.id === record.job_id);
                                         return `
                                             <div class="p-6 hover:bg-zinc-50/50 transition-all group flex items-center justify-between">
@@ -1125,11 +1276,11 @@
                                                         <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-400">${escHtml(record.date)} • ${escHtml(record.job_name)}</p>
                                                     </div>
                                                 </div>
-                                                <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                                                    <button onclick="window.editIncome(${Number(record.id)}, ${Number(record.amount)}, ${Number(record.job_id)}, ${escHandlerArg(record.date)})" class="w-10 h-10 rounded-xl bg-zinc-50 text-zinc-300 hover:text-zinc-900 hover:bg-zinc-100 flex items-center justify-center transition-all">
+                                                <div class="flex gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
+                                                    <button type="button" onclick="window.editIncome(${Number(record.id)}, ${Number(record.amount)}, ${Number(record.job_id)}, ${escHandlerArg(record.date)})" aria-label="Edit income record" class="w-10 h-10 rounded-xl bg-zinc-50 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 flex items-center justify-center transition-all">
                                                         <i data-lucide="edit-3" class="w-4 h-4"></i>
                                                     </button>
-                                                    <button onclick="window.deleteIncome(${Number(record.id)})" class="w-10 h-10 rounded-xl bg-zinc-50 text-zinc-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all">
+                                                    <button type="button" onclick="window.deleteIncome(${Number(record.id)})" aria-label="Delete income record" class="w-10 h-10 rounded-xl bg-zinc-50 text-zinc-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all">
                                                         <i data-lucide="trash-2" class="w-4 h-4"></i>
                                                     </button>
                                                 </div>
@@ -1481,8 +1632,11 @@
                 .filter(i => i.date.startsWith(currentMonth))
                 .reduce((sum, i) => sum + i.amount, 0);
             const target = state.targets.find(t => t.month === currentMonth)?.amount || 0;
-            const progress = target > 0 ? (monthlyIncome / target) * 100 : 0;
-            const exceeded = monthlyIncome > target ? monthlyIncome - target : 0;
+            const hasTarget = target > 0;
+            const progress = hasTarget ? (monthlyIncome / target) * 100 : 0;
+            const achieved = hasTarget && monthlyIncome >= target;
+            const exceeded = hasTarget && monthlyIncome > target ? monthlyIncome - target : 0;
+            const sortedTargets = [...state.targets].sort((a, b) => b.month.localeCompare(a.month));
 
             container.innerHTML = `
                 <div class="animate-slide space-y-8">
@@ -1491,7 +1645,7 @@
                             <h2 class="text-3xl font-extrabold tracking-tight">Income Targets</h2>
                             <p class="text-zinc-500 font-medium">Set goals and visualize your financial growth.</p>
                         </div>
-                        <button onclick="window.showSetTargetModal()" class="bg-zinc-900 text-white px-8 py-4 rounded-2xl font-bold hover:bg-zinc-800 transition-all shadow-lg shadow-zinc-200 flex items-center gap-2">
+                        <button type="button" onclick="window.showSetTargetModal()" class="bg-zinc-900 text-white px-8 py-4 rounded-2xl font-bold hover:bg-zinc-800 transition-all shadow-lg shadow-zinc-200 flex items-center gap-2">
                             <i data-lucide="target" class="w-5 h-5"></i>
                             <span>Set Monthly Target</span>
                         </button>
@@ -1502,11 +1656,11 @@
                             <div class="flex justify-between items-center mb-10">
                                 <h3 class="text-xl font-extrabold tracking-tight">Month Progress</h3>
                                 <div class="flex items-center gap-2">
-                                    <button onclick="window.changeMonth(-1)" class="w-8 h-8 rounded-lg bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
+                                    <button type="button" onclick="window.changeMonth(-1)" aria-label="Previous month" class="w-8 h-8 rounded-lg bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
                                         <i data-lucide="chevron-left" class="w-4 h-4"></i>
                                     </button>
                                     <span class="px-4 py-2 bg-zinc-50 rounded-xl text-xs font-bold text-zinc-400 uppercase tracking-widest">${monthName}</span>
-                                    <button onclick="window.changeMonth(1)" class="w-8 h-8 rounded-lg bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
+                                    <button type="button" onclick="window.changeMonth(1)" aria-label="Next month" class="w-8 h-8 rounded-lg bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
                                         <i data-lucide="chevron-right" class="w-4 h-4"></i>
                                     </button>
                                 </div>
@@ -1515,8 +1669,8 @@
                             <div class="relative h-64 flex items-center justify-center mb-10">
                                 <canvas id="progressCircle"></canvas>
                                 <div class="absolute inset-0 flex flex-col items-center justify-center">
-                                    <span class="text-5xl font-black text-zinc-900">${progress.toFixed(0)}%</span>
-                                    <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mt-1">Achieved</span>
+                                    <span class="text-5xl font-black text-zinc-900">${hasTarget ? progress.toFixed(0) + '%' : '—'}</span>
+                                    <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mt-1">${hasTarget ? 'Achieved' : 'No Target'}</span>
                                 </div>
                             </div>
 
@@ -1527,7 +1681,7 @@
                                 </div>
                                 <div class="p-6 bg-zinc-50 rounded-3xl border border-zinc-100">
                                     <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2">Target Goal</p>
-                                    <p class="text-2xl font-black text-zinc-900">NTD ${target.toLocaleString()}</p>
+                                    <p class="text-2xl font-black text-zinc-900">${hasTarget ? 'NTD ' + target.toLocaleString() : 'Not set'}</p>
                                 </div>
                             </div>
                         </div>
@@ -1539,13 +1693,18 @@
                                     <div>
                                         <div class="flex justify-between text-xs font-bold uppercase tracking-widest text-zinc-500 mb-2">
                                             <span>Status</span>
-                                            <span class="${monthlyIncome >= target ? 'text-emerald-400' : 'text-zinc-400'}">${monthlyIncome >= target ? 'Completed' : 'In Progress'}</span>
+                                            <span class="${achieved ? 'text-emerald-400' : 'text-zinc-400'}">${!hasTarget ? 'No Target' : achieved ? 'Completed' : 'In Progress'}</span>
                                         </div>
                                         <div class="h-2 bg-white/5 rounded-full overflow-hidden">
-                                            <div class="h-full bg-emerald-400" style="width: ${Math.min(progress, 100)}%"></div>
+                                            <div class="h-full bg-emerald-400" style="width: ${hasTarget ? Math.min(progress, 100) : 0}%"></div>
                                         </div>
                                     </div>
-                                    ${exceeded > 0 ? `
+                                    ${!hasTarget ? `
+                                        <div class="pt-6 border-t border-white/10">
+                                            <p class="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-2">No Target Set</p>
+                                            <p class="text-sm font-medium text-zinc-400">Set a target for ${monthName} to track goal progress.</p>
+                                        </div>
+                                    ` : exceeded > 0 ? `
                                         <div class="pt-6 border-t border-white/10">
                                             <p class="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-2">Exceeding by</p>
                                             <p class="text-3xl font-black text-emerald-400">NTD ${exceeded.toLocaleString()}</p>
@@ -1563,13 +1722,20 @@
                             <div class="bg-white p-8 rounded-[2.5rem] border border-black/5 shadow-sm">
                                 <h3 class="text-lg font-extrabold mb-4 tracking-tight">Target History</h3>
                                 <div class="space-y-4 max-h-[200px] overflow-y-auto pr-2">
-                                    ${state.targets.sort((a,b) => b.month.localeCompare(a.month)).map(t => `
-                                        <div class="flex justify-between items-center p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                                    ${sortedTargets.length === 0 ? `
+                                        <p class="text-sm text-zinc-400 text-center py-6">No targets set yet.</p>
+                                    ` : sortedTargets.map(t => `
+                                        <div class="flex justify-between items-center p-4 bg-zinc-50 rounded-2xl border border-zinc-100 gap-3">
                                             <div>
                                                 <p class="text-xs font-bold text-zinc-900">${escHtml(t.month)}</p>
                                                 <p class="text-[10px] text-zinc-400 font-medium">Monthly Target</p>
                                             </div>
-                                            <span class="font-black text-zinc-900">NTD ${Number(t.amount).toLocaleString()}</span>
+                                            <div class="flex items-center gap-3">
+                                                <span class="font-black text-zinc-900">NTD ${Number(t.amount).toLocaleString()}</span>
+                                                <button type="button" onclick="window.deleteTarget(${Number(t.id)})" aria-label="Delete target for ${escAttr(t.month)}" class="w-8 h-8 rounded-lg bg-white text-zinc-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all border border-zinc-100">
+                                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                                </button>
+                                            </div>
                                         </div>
                                     `).join('')}
                                 </div>
@@ -1582,12 +1748,12 @@
             lucide.createIcons();
 
             // Progress Circle Chart
-            new Chart(document.getElementById('progressCircle'), {
+            createChart('progressCircle', {
                 type: 'doughnut',
                 data: {
                     datasets: [{
-                        data: [monthlyIncome, Math.max(0, target - monthlyIncome)],
-                        backgroundColor: [monthlyIncome >= target ? '#10b981' : '#18181b', '#f4f4f5'],
+                        data: hasTarget ? [monthlyIncome, Math.max(0, target - monthlyIncome)] : [0, 1],
+                        backgroundColor: [achieved ? '#10b981' : '#18181b', isDarkTheme() ? '#26262b' : '#f4f4f5'],
                         borderWidth: 0,
                         circumference: 360,
                         rotation: 0
@@ -1602,16 +1768,29 @@
             });
         }
 
+        window.deleteTarget = async (id) => {
+            if (!confirm('Delete this monthly target?')) return;
+            const res = await fetch(`/api/targets/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                await fetchData();
+                render();
+                showToast('Target deleted');
+            } else {
+                const err = await res.json().catch(() => ({}));
+                showToast(err.error || 'Failed to delete target', 'error');
+            }
+        };
+
         window.showSetTargetModal = () => {
             const modal = document.getElementById('modal-container');
             modal.innerHTML = `
-                <div class="fixed inset-0 bg-zinc-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4">
+                <div class="fixed inset-0 bg-zinc-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label="Set Target">
                     <div class="bg-white p-10 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-black/5 animate-slide">
                         <h3 class="text-3xl font-extrabold mb-8 tracking-tight">Set Target</h3>
                         <form id="setTargetForm" class="space-y-6">
                             <div>
                                 <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Month</label>
-                                <input type="month" name="month" value="${localYM()}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
+                                <input type="month" name="month" value="${escAttr(state.selectedMonth)}" class="w-full p-4 rounded-2xl bg-zinc-50 border border-zinc-100 focus:border-zinc-900 focus:bg-white outline-none transition-all font-medium" required>
                             </div>
                             <div>
                                 <label class="block text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-2 ml-1">Target Amount (NTD)</label>
@@ -1655,9 +1834,9 @@
                             <p class="text-zinc-500 font-medium text-sm mt-1">${summaryMonthName} • Total Income: NTD ${summaryTotal.toLocaleString()}</p>
                         </div>
                         <div class="flex items-center gap-2 bg-zinc-100 p-1 rounded-2xl border border-black/5 self-start sm:self-auto">
-                            <button onclick="window.changeMonth(-1)" class="w-8 h-8 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
-                            <button onclick="window.changeMonth(0)" class="px-4 py-2 ${currentMonth === localYM() ? 'bg-white shadow-sm' : 'bg-zinc-50'} rounded-xl text-[10px] md:text-xs font-bold text-zinc-900">${currentMonth === localYM() ? 'Current Month' : summaryMonthName + ' (back to today)'}</button>
-                            <button onclick="window.changeMonth(1)" class="w-8 h-8 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+                            <button type="button" onclick="window.changeMonth(-1)" aria-label="Previous month" class="w-8 h-8 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+                            <button type="button" onclick="window.changeMonth(0)" class="px-4 py-2 ${currentMonth === localYM() ? 'bg-white shadow-sm' : 'bg-zinc-50'} rounded-xl text-[10px] md:text-xs font-bold text-zinc-900">${currentMonth === localYM() ? 'Current Month' : summaryMonthName + ' (back to today)'}</button>
+                            <button type="button" onclick="window.changeMonth(1)" aria-label="Next month" class="w-8 h-8 md:w-10 md:h-10 rounded-xl flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
                         </div>
                     </div>
 
@@ -1669,18 +1848,27 @@
                                 <p class="text-zinc-400 text-[10px] md:text-xs font-medium mt-1">Select chart type below</p>
                             </div>
                             <div class="flex gap-2 bg-zinc-50 p-1 rounded-xl border border-black/5">
-                                <button onclick="window.setSummaryChart('bar')" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all bg-zinc-900 text-white" id="chartBtn-bar">Bar</button>
-                                <button onclick="window.setSummaryChart('line')" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-900 transition-all" id="chartBtn-line">Line</button>
-                                <button onclick="window.setSummaryChart('polarArea')" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-900 transition-all" id="chartBtn-polarArea">Polar</button>
+                                <button type="button" onclick="window.setSummaryChart('bar')" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all bg-zinc-900 text-white" id="chartBtn-bar">Bar</button>
+                                <button type="button" onclick="window.setSummaryChart('line')" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-900 transition-all" id="chartBtn-line">Line</button>
+                                <button type="button" onclick="window.setSummaryChart('polarArea')" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-900 transition-all" id="chartBtn-polarArea">Polar</button>
                             </div>
                         </div>
                         <div class="h-[300px] md:h-[400px] relative">
-                            <canvas id="summaryChart"></canvas>
+                            ${summaryTotal === 0
+                                ? `<div class="h-full flex flex-col items-center justify-center text-center text-zinc-400 gap-2">
+                                    <i data-lucide="bar-chart-3" class="w-8 h-8 opacity-40"></i>
+                                    <p class="text-sm font-medium">No income recorded for ${summaryMonthName}</p>
+                                </div>`
+                                : `<canvas id="summaryChart"></canvas>`}
                         </div>
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-                        ${state.jobs.map(job => {
+                        ${state.jobs.length === 0 ? `
+                            <div class="col-span-full bg-white p-10 rounded-3xl border border-black/5 shadow-sm text-center text-zinc-400">
+                                <p class="text-sm font-medium">No job profiles yet. Create a job to see per-job breakdowns.</p>
+                            </div>
+                        ` : state.jobs.map(job => {
                             const total = state.income
                                 .filter(i => i.job_id === job.id && i.date.startsWith(currentMonth))
                                 .reduce((sum, i) => sum + i.amount, 0);
@@ -1700,7 +1888,6 @@
             `;
             lucide.createIcons();
 
-            let summaryChart = null;
             let currentChartType = 'bar';
 
             window.setSummaryChart = (type) => {
@@ -1717,11 +1904,7 @@
             };
 
             const updateSummaryChart = () => {
-                if (summaryChart) summaryChart.destroy();
-                
-                const ctx = document.getElementById('summaryChart');
-                if (!ctx) return;
-
+                if (summaryTotal === 0) return;
                 const jobTotals = state.jobs.map(job => {
                     return {
                         name: job.name,
@@ -1731,8 +1914,9 @@
                             .reduce((sum, i) => sum + i.amount, 0)
                     };
                 }).filter(j => j.total > 0);
+                if (jobTotals.length === 0) return;
 
-                summaryChart = new Chart(ctx, {
+                createChart('summaryChart', {
                     type: currentChartType,
                     data: {
                         labels: jobTotals.map(j => j.name),
@@ -1767,12 +1951,28 @@
         }
 
         async function renderAdmin(container) {
-            const [usersRes, statsRes] = await Promise.all([
-                fetch('/api/admin/users'),
-                fetch('/api/admin/stats')
-            ]);
+            container.innerHTML = '<div class="flex items-center justify-center py-20"><div class="animate-spin rounded-full h-10 w-10 border-b-2 border-zinc-900"></div></div>';
+            let usersRes, statsRes;
+            try {
+                [usersRes, statsRes] = await Promise.all([
+                    fetch('/api/admin/users'),
+                    fetch('/api/admin/stats')
+                ]);
+            } catch (e) {
+                if (state.currentView !== 'admin') return;
+                container.innerHTML = '<div class="bg-white p-10 rounded-[2.5rem] border border-black/5 text-center text-red-500 font-bold">Network error loading admin data.</div>';
+                return;
+            }
+            if (state.currentView !== 'admin') return;
+            if (!usersRes.ok || !statsRes.ok) {
+                container.innerHTML = '<div class="bg-white p-10 rounded-[2.5rem] border border-black/5 text-center text-red-500 font-bold">Unable to load admin data.</div>';
+                return;
+            }
             const users = await usersRes.json();
             const stats = await statsRes.json();
+            if (state.currentView !== 'admin') return;
+            const dailyTrend = Array.isArray(stats.daily_trend) ? stats.daily_trend : [];
+            const hasTrendData = dailyTrend.some(d => Number(d.total) > 0);
             
             container.innerHTML = `
                 <div class="animate-slide space-y-8">
@@ -1799,7 +1999,25 @@
                         </div>
                         <div class="bg-white p-6 rounded-[2rem] border border-black/5 shadow-sm">
                             <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-2">System Income</p>
-                            <p class="text-2xl font-black text-emerald-600">NTD ${stats.total_income.toLocaleString()}</p>
+                            <p class="text-2xl font-black text-emerald-600">NTD ${Number(stats.total_income || 0).toLocaleString()}</p>
+                        </div>
+                    </div>
+
+                    <!-- 30-Day Income Trend -->
+                    <div class="bg-white p-6 md:p-10 rounded-[2.5rem] border border-black/5 shadow-sm">
+                        <div class="flex justify-between items-center mb-6">
+                            <div>
+                                <h3 class="text-lg md:text-xl font-extrabold tracking-tight">30-Day Income Trend</h3>
+                                <p class="text-xs text-zinc-400 font-medium mt-1">System-wide daily income across all users</p>
+                            </div>
+                        </div>
+                        <div class="h-[240px]">
+                            ${hasTrendData
+                                ? `<canvas id="adminTrendChart"></canvas>`
+                                : `<div class="h-full flex flex-col items-center justify-center text-zinc-400 gap-2">
+                                    <i data-lucide="trending-up" class="w-8 h-8 opacity-40"></i>
+                                    <p class="text-sm font-medium">No income recorded in the past 30 days</p>
+                                </div>`}
                         </div>
                     </div>
 
@@ -1833,15 +2051,20 @@
                                                     </div>
                                                 </td>
                                                 <td class="px-8 py-5">
-                                                    <select onchange="window.updateUserRole(${user.id}, this.value)" class="bg-zinc-100 border-none rounded-lg text-[10px] font-bold uppercase tracking-widest px-3 py-1 outline-none focus:ring-2 focus:ring-zinc-900 transition-all">
+                                                    <select onchange="window.updateUserRole(${user.id}, this.value)" aria-label="Role for ${escAttr(user.username)}" class="bg-zinc-100 border-none rounded-lg text-[10px] font-bold uppercase tracking-widest px-3 py-1 outline-none focus:ring-2 focus:ring-zinc-900 transition-all">
                                                         <option value="user" ${user.role === 'user' ? 'selected' : ''}>User</option>
                                                         <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
                                                     </select>
                                                 </td>
                                                 <td class="px-8 py-5 text-right">
-                                                    <button onclick="window.deleteUser(${user.id})" class="w-10 h-10 rounded-xl bg-zinc-50 text-zinc-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all ml-auto">
-                                                        <i data-lucide="user-minus" class="w-4 h-4"></i>
-                                                    </button>
+                                                    <div class="flex items-center justify-end gap-2">
+                                                        <button type="button" onclick="window.generateResetCode(${escHandlerArg(user.username)})" title="Generate password reset code" aria-label="Generate reset code for ${escAttr(user.username)}" class="w-10 h-10 rounded-xl bg-zinc-50 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 flex items-center justify-center transition-all">
+                                                            <i data-lucide="key-round" class="w-4 h-4"></i>
+                                                        </button>
+                                                        <button type="button" onclick="window.deleteUser(${user.id})" title="Delete user" aria-label="Delete user ${escAttr(user.username)}" class="w-10 h-10 rounded-xl bg-zinc-50 text-zinc-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all">
+                                                            <i data-lucide="user-minus" class="w-4 h-4"></i>
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         `).join('')}
@@ -1859,11 +2082,13 @@
                                 </h3>
                             </div>
                             <div class="divide-y divide-zinc-100">
-                                ${stats.recent_activity.map(act => `
+                                ${stats.recent_activity.length === 0 ? `
+                                    <div class="p-10 text-center text-sm text-zinc-400">No recent income activity.</div>
+                                ` : stats.recent_activity.map(act => `
                                     <div class="p-6 hover:bg-zinc-50/30 transition-all">
                                         <div class="flex justify-between items-start mb-1">
                                             <p class="text-sm font-bold text-zinc-900">${escHtml(act.username)}</p>
-                                            <span class="text-[10px] font-black text-emerald-600">NTD ${act.amount.toLocaleString()}</span>
+                                            <span class="text-[10px] font-black text-emerald-600">NTD ${Number(act.amount).toLocaleString()}</span>
                                         </div>
                                         <p class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">${escHtml(act.date)} • ${escHtml(act.job_name)}</p>
                                     </div>
@@ -1872,9 +2097,95 @@
                         </div>
                     </div>
                 </div>
+                <div id="modal-container"></div>
             `;
             lucide.createIcons();
+
+            if (hasTrendData) {
+                createChart('adminTrendChart', {
+                    type: 'line',
+                    data: {
+                        labels: dailyTrend.map(d => d.date.slice(5)),
+                        datasets: [{
+                            label: 'Daily Income (NTD)',
+                            data: dailyTrend.map(d => d.total),
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                            fill: true,
+                            tension: 0.35,
+                            borderWidth: 3,
+                            pointRadius: 3
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, grid: { display: false }, ticks: { color: chartColors() } },
+                            x: { grid: { display: false }, ticks: { color: chartColors(), maxTicksLimit: 10 } }
+                        }
+                    }
+                });
+            }
         }
+
+        window.generateResetCode = async (username) => {
+            try {
+                const res = await fetch('/api/auth/forgot-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    showToast(data.error || `Failed to generate reset code (HTTP ${res.status})`, 'error');
+                    return;
+                }
+                const token = data.reset_token;
+                if (!token) {
+                    showToast('Reset code could not be retrieved', 'error');
+                    return;
+                }
+                const modal = document.getElementById('modal-container');
+                if (!modal) return;
+                modal.innerHTML = `
+                    <div class="fixed inset-0 bg-zinc-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label="Password Reset Code">
+                        <div class="bg-white p-10 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-black/5 animate-slide">
+                            <div class="flex items-center justify-between mb-6">
+                                <h3 class="text-2xl font-extrabold tracking-tight">Password Reset Code</h3>
+                                <button type="button" onclick="this.closest('.fixed').remove()" aria-label="Close modal" class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-zinc-900 transition-all">
+                                    <i data-lucide="x" class="w-5 h-5"></i>
+                                </button>
+                            </div>
+                            <p class="text-sm text-zinc-500 mb-4">Share this single-use reset code with <strong class="text-zinc-900">${escHtml(username)}</strong>. It expires in 30 minutes.</p>
+                            <div class="p-4 rounded-2xl bg-zinc-50 border border-zinc-100 font-mono text-sm break-all select-all text-zinc-900 mb-6" id="admin-reset-token-box">${escHtml(token)}</div>
+                            <div class="flex gap-3">
+                                <button type="button" onclick="this.closest('.fixed').remove()" class="flex-1 py-3.5 border border-zinc-100 rounded-2xl font-bold text-zinc-500 hover:bg-zinc-50 transition-all">Close</button>
+                                <button type="button" id="copy-reset-token-btn" class="flex-1 py-3.5 bg-emerald-500 text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all flex items-center justify-center gap-2">
+                                    <i data-lucide="copy" class="w-4 h-4"></i>
+                                    <span>Copy Code</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                lucide.createIcons();
+                const copyBtn = document.getElementById('copy-reset-token-btn');
+                if (copyBtn) {
+                    copyBtn.onclick = async () => {
+                        try {
+                            await navigator.clipboard.writeText(token);
+                            showToast('Reset code copied to clipboard');
+                        } catch (e) {
+                            showToast('Select and copy the code manually', 'error');
+                        }
+                    };
+                }
+            } catch (e) {
+                showToast('Network error generating reset code', 'error');
+            }
+        };
 
         window.updateUserRole = async (id, role) => {
             const res = await fetch(`/api/admin/users/${id}`, {
@@ -1898,317 +2209,6 @@
             }
         };
 
-
-        // ── Notes state (scoped to avoid conflicts with other views) ──
-        let _notes = [];
-        let _activeNote = null;
-        let _saveTimer = null;
-        let _searchQuery = '';
-
-        function renderNotes(container) {
-            _notes = [];
-            _activeNote = null;
-            _saveTimer = null;
-            _searchQuery = '';
-
-            container.innerHTML = `
-                <style>
-                .notes-wrap { display:flex; gap:0; height:calc(100vh - 160px); min-height:500px; background:#fff; border-radius:2.5rem; overflow:hidden; border:1px solid rgba(0,0,0,0.05); box-shadow:0 4px 20px -2px rgba(0,0,0,0.05); }
-
-                .notes-sidebar { width:280px; min-width:280px; background:#f9f9f8; border-right:1px solid #e8e6e1; display:flex; flex-direction:column; }
-                .notes-sidebar-hd { padding:20px 16px 12px; border-bottom:1px solid #e8e6e1; }
-                .notes-sidebar-title { font-family:'DM Serif Display',serif; font-size:18px; color:#18181b; margin-bottom:12px; }
-                .notes-search-wrap { position:relative; }
-                .notes-search-icon { position:absolute; left:9px; top:50%; transform:translateY(-50%); color:#aaa; pointer-events:none; }
-                #n-search { width:100%; background:#fff; border:1px solid #e2e8f0; border-radius:10px; color:#18181b; font-family:inherit; font-size:13px; padding:7px 10px 7px 30px; outline:none; transition:border-color 0.15s; }
-                #n-search:focus { border-color:#18181b; }
-                .notes-new-btn { display:flex; align-items:center; gap:8px; width:calc(100% - 32px); margin:10px 16px 0; padding:8px 12px; background:rgba(212,168,83,0.08); border:1px solid rgba(212,168,83,0.25); border-radius:10px; color:#b8892a; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; transition:all 0.15s; }
-                .notes-new-btn:hover { background:rgba(212,168,83,0.15); }
-                .notes-new-icon { width:16px; height:16px; background:#d4a853; border-radius:4px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:15px; line-height:1; flex-shrink:0; }
-                .notes-list { flex:1; overflow-y:auto; padding:6px 0; }
-                .notes-list::-webkit-scrollbar { width:3px; }
-                .notes-list::-webkit-scrollbar-thumb { background:#d1cfc9; border-radius:2px; }
-                .n-section-label { padding:8px 16px 3px; font-size:10px; font-weight:600; color:#aaa; letter-spacing:0.1em; text-transform:uppercase; }
-                .n-item { padding:9px 16px; cursor:pointer; border-left:2px solid transparent; transition:background 0.1s; }
-                .n-item:hover { background:#f0ede8; }
-                .n-item.active { background:#f0ede8; border-left-color:#d4a853; }
-                .n-item-title { font-size:13px; font-weight:600; color:#18181b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; display:flex; align-items:center; gap:5px; }
-                .n-pin-icon { color:#d4a853; font-size:10px; flex-shrink:0; }
-                .n-item-preview { font-size:11px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-                .n-item-meta { font-size:10px; color:#bbb; margin-top:2px; }
-                .n-empty-list { padding:24px 16px; text-align:center; color:#bbb; font-size:13px; }
-
-                .notes-editor { flex:1; display:flex; flex-direction:column; min-width:0; }
-                .notes-empty-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:#ccc; }
-                .notes-empty-icon { width:44px; height:44px; border-radius:10px; background:#f4f4f5; border:1px solid #e2e8f0; display:flex; align-items:center; justify-content:center; }
-                .notes-toolbar { padding:14px 24px; border-bottom:1px solid #f0ede8; display:flex; align-items:center; gap:8px; flex-shrink:0; }
-                .notes-toolbar .spacer { flex:1; }
-                .n-save-ind { font-size:11px; color:#bbb; font-family:'JetBrains Mono',monospace; }
-                .n-save-ind.saved { color:#5c9e6e; }
-                .n-toolbar-btn { display:flex; align-items:center; gap:5px; padding:6px 11px; border-radius:8px; border:1px solid #e2e8f0; background:transparent; color:#888; font-family:inherit; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.15s; }
-                .n-toolbar-btn:hover { background:#f4f4f5; color:#18181b; border-color:#d1d5db; }
-                .n-toolbar-btn.pin-active { color:#d4a853; border-color:rgba(212,168,83,0.4); background:rgba(212,168,83,0.08); }
-                .n-toolbar-btn.danger:hover { color:#c9554a; border-color:rgba(201,85,74,0.3); background:rgba(201,85,74,0.06); }
-                .notes-content { flex:1; overflow-y:auto; padding:28px 32px; display:flex; flex-direction:column; }
-                .notes-content::-webkit-scrollbar { width:3px; }
-                .notes-content::-webkit-scrollbar-thumb { background:#e2e8f0; border-radius:2px; }
-                #n-title-input { background:transparent; border:none; outline:none; font-family:'DM Serif Display',serif; font-size:28px; color:#18181b; width:100%; letter-spacing:-0.3px; margin-bottom:4px; caret-color:#d4a853; resize:none; line-height:1.3; }
-                #n-title-input::placeholder { color:#ddd; }
-                .n-date-line { font-size:11px; color:#bbb; font-family:'JetBrains Mono',monospace; margin-bottom:20px; padding-bottom:14px; border-bottom:1px solid #f0ede8; }
-                #n-body-input { background:transparent; border:none; outline:none; font-family:inherit; font-size:14px; color:#555; width:100%; flex:1; resize:none; line-height:1.8; caret-color:#d4a853; min-height:320px; }
-                #n-body-input::placeholder { color:#ddd; }
-
-                .n-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200; align-items:center; justify-content:center; }
-                .n-modal-overlay.open { display:flex; }
-                .n-modal { background:#fff; border:1px solid #e2e8f0; border-radius:16px; padding:24px; width:340px; max-width:90vw; }
-                .n-modal h3 { font-family:'DM Serif Display',serif; font-size:17px; margin-bottom:6px; font-weight:400; }
-                .n-modal p { font-size:13px; color:#888; line-height:1.6; margin-bottom:18px; }
-                .n-modal-btns { display:flex; gap:8px; justify-content:flex-end; }
-                .n-btn { padding:7px 14px; border-radius:8px; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; border:1px solid #e2e8f0; background:transparent; color:#888; transition:all 0.15s; }
-                .n-btn:hover { background:#f4f4f5; color:#18181b; }
-                .n-btn.danger { background:rgba(201,85,74,0.06); border-color:rgba(201,85,74,0.25); color:#c9554a; }
-                .n-btn.danger:hover { background:rgba(201,85,74,0.12); }
-
-                .n-toast { position:fixed; bottom:24px; right:24px; background:#18181b; border-radius:10px; padding:9px 16px; font-size:13px; color:#fff; opacity:0; transform:translateY(8px); transition:all 0.2s; pointer-events:none; z-index:300; }
-                .n-toast.show { opacity:1; transform:translateY(0); }
-                </style>
-
-                <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-
-                <div class="notes-wrap">
-                    <aside class="notes-sidebar">
-                        <div class="notes-sidebar-hd">
-                            <div class="notes-sidebar-title">Notes</div>
-                            <div class="notes-search-wrap">
-                                <span class="notes-search-icon">
-                                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><circle cx="7" cy="7" r="5"/><line x1="11" y1="11" x2="14" y2="14"/></svg>
-                                </span>
-                                <input id="n-search" type="text" placeholder="Search notes…" oninput="window._nFilterNotes(this.value)">
-                            </div>
-                        </div>
-                        <button class="notes-new-btn" onclick="window._nCreateNote()">
-                            <span class="notes-new-icon">+</span>
-                            New note
-                        </button>
-                        <div class="notes-list" id="n-list"><div class="n-empty-list">No notes yet</div></div>
-                    </aside>
-
-                    <div class="notes-editor">
-                        <div class="notes-empty-state" id="n-empty">
-                            <div class="notes-empty-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1.5" width="20" height="20"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                            </div>
-                            <p style="font-size:14px;color:#ccc;">Select a note or create one</p>
-                        </div>
-                        <div id="n-editor-active" style="display:none;flex-direction:column;height:100%;">
-                            <div class="notes-toolbar">
-                                <span class="n-save-ind" id="n-save-ind">—</span>
-                                <div class="spacer"></div>
-                                <button class="n-toolbar-btn" id="n-pin-btn" onclick="window._nTogglePin()">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="13" height="13"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                                    Pin
-                                </button>
-                                <button class="n-toolbar-btn danger" onclick="window._nConfirmDelete()">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-                                    Delete
-                                </button>
-                            </div>
-                            <div class="notes-content">
-                                <textarea id="n-title-input" rows="1" placeholder="Note title…" oninput="window._nAutoResize(this); window._nScheduleSave()"></textarea>
-                                <div class="n-date-line" id="n-date-line"></div>
-                                <textarea id="n-body-input" placeholder="Start writing…" oninput="window._nScheduleSave()"></textarea>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="n-modal-overlay" id="n-del-modal">
-                    <div class="n-modal">
-                        <h3>Delete this note?</h3>
-                        <p>This action cannot be undone. The note will be permanently removed.</p>
-                        <div class="n-modal-btns">
-                            <button class="n-btn" onclick="window._nCloseModal()">Cancel</button>
-                            <button class="n-btn danger" onclick="window._nDeleteNote()">Delete</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="n-toast" id="n-toast"></div>
-            `;
-
-            // ── helpers ──
-            const API = '/api/notes';
-
-            function nFmtDate(s) {
-                const d = new Date(s);
-                return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + '  ·  ' + d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
-            }
-            function nFmtShort(s) {
-                const d = new Date(s), now = new Date(), diff = now - d;
-                if (diff < 60000) return 'just now';
-                if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
-                if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
-                return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
-            }
-            function escH(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-            function nRenderList(list) {
-                const el = document.getElementById('n-list');
-                if (!el) return;
-                if (!list.length) { el.innerHTML = '<div class="n-empty-list">No notes found</div>'; return; }
-                const pinned = list.filter(n => n.pinned), unpinned = list.filter(n => !n.pinned);
-                let html = '';
-                if (pinned.length) { html += '<div class="n-section-label">Pinned</div>'; html += pinned.map(nItemHTML).join(''); }
-                if (unpinned.length) { if (pinned.length) html += '<div class="n-section-label">All notes</div>'; html += unpinned.map(nItemHTML).join(''); }
-                el.innerHTML = html;
-            }
-            function nItemHTML(n) {
-                const active = _activeNote && _activeNote.id === n.id ? ' active' : '';
-                const pin = n.pinned ? '<span class="n-pin-icon">★</span>' : '';
-                const prev = n.content ? n.content.replace(/\n/g,' ').slice(0,55) + (n.content.length > 55 ? '…' : '') : '—';
-                return `<div class="n-item${active}" onclick="window._nOpenNote(${n.id})">
-                    <div class="n-item-title">${pin}${escH(n.title||'Untitled')}</div>
-                    <div class="n-item-preview">${escH(prev)}</div>
-                    <div class="n-item-meta">${nFmtShort(n.updated_at)}</div>
-                </div>`;
-            }
-            function nFilteredNotes() {
-                if (!_searchQuery) return _notes;
-                return _notes.filter(n => n.title.toLowerCase().includes(_searchQuery) || n.content.toLowerCase().includes(_searchQuery));
-            }
-            function nSetSave(state) {
-                const el = document.getElementById('n-save-ind');
-                if (!el) return;
-                el.className = 'n-save-ind';
-                if (state === 'saved') { el.textContent = 'Saved'; el.classList.add('saved'); }
-                else if (state === 'saving') { el.textContent = 'Saving…'; }
-                else if (state === 'error') { el.textContent = 'Save failed'; el.style.color = '#c9554a'; }
-                else { el.textContent = '—'; }
-            }
-            function nShowToast(msg) {
-                const t = document.getElementById('n-toast');
-                if (!t) return;
-                t.textContent = msg; t.classList.add('show');
-                setTimeout(() => t.classList.remove('show'), 2200);
-            }
-            function nUpdatePinBtn() {
-                const btn = document.getElementById('n-pin-btn');
-                if (!btn) return;
-                if (_activeNote && _activeNote.pinned) {
-                    btn.classList.add('pin-active');
-                    btn.querySelector('svg').style.fill = 'currentColor';
-                } else {
-                    btn.classList.remove('pin-active');
-                    btn.querySelector('svg').style.fill = 'none';
-                }
-            }
-
-            // ── global handlers (called from inline onclick) ──
-            window._nAutoResize = (el) => { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; };
-            window._nFilterNotes = (q) => { _searchQuery = q.toLowerCase(); nRenderList(nFilteredNotes()); };
-            window._nConfirmDelete = () => { const m = document.getElementById('n-del-modal'); if (m) m.classList.add('open'); };
-            window._nCloseModal = () => { const m = document.getElementById('n-del-modal'); if (m) m.classList.remove('open'); };
-
-            window._nScheduleSave = () => {
-                nSetSave('saving');
-                clearTimeout(_saveTimer);
-                _saveTimer = setTimeout(window._nSaveNow, 900);
-            };
-
-            window._nSaveNow = async () => {
-                if (!_activeNote) return;
-                const title = (document.getElementById('n-title-input')?.value || '').trim() || 'Untitled';
-                const content = document.getElementById('n-body-input')?.value || '';
-                try {
-                    const res = await fetch(`${API}/${_activeNote.id}`, {
-                        method: 'PUT', headers: {'Content-Type':'application/json'}, credentials: 'include',
-                        body: JSON.stringify({title, content})
-                    });
-                    const updated = await res.json();
-                    _activeNote.title = updated.title;
-                    _activeNote.content = updated.content;
-                    _activeNote.updated_at = updated.updated_at;
-                    nSetSave('saved');
-                    const dl = document.getElementById('n-date-line');
-                    if (dl) dl.textContent = 'Last edited ' + nFmtDate(updated.updated_at);
-                    const idx = _notes.findIndex(n => n.id === _activeNote.id);
-                    if (idx !== -1) _notes[idx] = _activeNote;
-                    nRenderList(nFilteredNotes());
-                } catch(e) { nSetSave('error'); }
-            };
-
-            window._nOpenNote = (id) => {
-                if (_saveTimer) { clearTimeout(_saveTimer); window._nSaveNow(); }
-                _activeNote = _notes.find(n => n.id === id);
-                if (!_activeNote) return;
-                document.getElementById('n-empty').style.display = 'none';
-                const ae = document.getElementById('n-editor-active');
-                ae.style.display = 'flex';
-                const titleEl = document.getElementById('n-title-input');
-                titleEl.value = _activeNote.title;
-                window._nAutoResize(titleEl);
-                document.getElementById('n-body-input').value = _activeNote.content;
-                document.getElementById('n-date-line').textContent = 'Last edited ' + nFmtDate(_activeNote.updated_at);
-                nSetSave('saved');
-                nUpdatePinBtn();
-                nRenderList(nFilteredNotes());
-            };
-
-            window._nCreateNote = async () => {
-                try {
-                    const res = await fetch(API, {
-                        method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include',
-                        body: JSON.stringify({title: 'New note', content: ''})
-                    });
-                    const note = await res.json();
-                    _notes.unshift(note);
-                    nRenderList(nFilteredNotes());
-                    window._nOpenNote(note.id);
-                    const t = document.getElementById('n-title-input');
-                    if (t) { t.focus(); t.select(); }
-                } catch(e) { nShowToast('Could not create note'); }
-            };
-
-            window._nTogglePin = async () => {
-                if (!_activeNote) return;
-                const newPinned = !_activeNote.pinned;
-                try {
-                    const res = await fetch(`${API}/${_activeNote.id}`, {
-                        method: 'PUT', headers: {'Content-Type':'application/json'}, credentials: 'include',
-                        body: JSON.stringify({pinned: newPinned})
-                    });
-                    const updated = await res.json();
-                    _activeNote.pinned = updated.pinned;
-                    const idx = _notes.findIndex(n => n.id === _activeNote.id);
-                    if (idx !== -1) _notes[idx] = _activeNote;
-                    nUpdatePinBtn();
-                    nRenderList(nFilteredNotes());
-                    nShowToast(newPinned ? 'Note pinned' : 'Note unpinned');
-                } catch(e) { nShowToast('Could not update note'); }
-            };
-
-            window._nDeleteNote = async () => {
-                window._nCloseModal();
-                if (!_activeNote) return;
-                const id = _activeNote.id;
-                try {
-                    await fetch(`${API}/${id}`, { method: 'DELETE', credentials: 'include' });
-                    _notes = _notes.filter(n => n.id !== id);
-                    _activeNote = null;
-                    const ae = document.getElementById('n-editor-active');
-                    if (ae) ae.style.display = 'none';
-                    const empty = document.getElementById('n-empty');
-                    if (empty) empty.style.display = 'flex';
-                    nRenderList(nFilteredNotes());
-                    nShowToast('Note deleted');
-                } catch(e) { nShowToast('Could not delete note'); }
-            };
-
-            // ── initial fetch ──
-            fetch(API, {credentials: 'include'})
-                .then(r => r.json())
-                .then(data => { _notes = data; nRenderList(_notes); })
-                .catch(() => nShowToast('Failed to load notes'));
-        }
 
         function renderExpenses(container) {
             const currentMonth = state.selectedMonth;
@@ -2246,11 +2246,10 @@
                 });
             });
 
-            // Weekly spend last 7 days
-            const last7 = [...Array(7)].map((_, i) => {
-                const d = new Date(); d.setDate(d.getDate() - i);
-                return localYMD(d);
-            }).reverse();
+            // Weekly spend scoped to selectedMonth
+            const dayStats = getMonthDayStats(currentMonth);
+            const weeklyWindow = getWeeklyWindowForMonth(currentMonth);
+            const last7 = weeklyWindow.days;
             const weeklySpend = last7.map(date =>
                 state.expenses.filter(e => e.date === date).reduce((s, e) => s + e.amount, 0)
             );
@@ -2295,7 +2294,7 @@
                         </div>
                         <div class="bg-white p-6 rounded-[2rem] border border-black/5 shadow-sm">
                             <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-2">Daily Average</p>
-                            <p class="text-2xl font-black text-zinc-900">NTD ${(totalMonthly / new Date().getDate()).toFixed(0)}</p>
+                            <p class="text-2xl font-black text-zinc-900">NTD ${(totalMonthly / dayStats.divisor).toFixed(0)}</p>
                         </div>
                         <div class="bg-white p-6 rounded-[2rem] border border-black/5 shadow-sm">
                             <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-2">Total Records</p>
@@ -2356,7 +2355,7 @@
                             <div class="flex justify-between items-center mb-8">
                                 <div>
                                     <h3 class="text-xl font-extrabold tracking-tight">Weekly Spending</h3>
-                                    <p class="text-xs text-zinc-400 font-medium mt-1">Last 7 days</p>
+                                    <p class="text-xs text-zinc-400 font-medium mt-1">${weeklyWindow.subtitle}</p>
                                 </div>
                                 <span class="w-3 h-3 rounded-full bg-red-400"></span>
                             </div>
@@ -2369,7 +2368,12 @@
                         <div class="bg-white p-8 md:p-10 rounded-[2.5rem] border border-black/5 shadow-sm">
                             <h3 class="text-xl font-extrabold tracking-tight mb-8">By Category</h3>
                             <div class="h-[180px]">
-                                <canvas id="expenseTypeChart"></canvas>
+                                ${Object.keys(byType).length === 0
+                                    ? `<div class="h-full flex flex-col items-center justify-center text-zinc-400 gap-2">
+                                        <i data-lucide="pie-chart" class="w-7 h-7 opacity-40"></i>
+                                        <p class="text-xs font-medium">No expenses this month</p>
+                                    </div>`
+                                    : `<canvas id="expenseTypeChart"></canvas>`}
                             </div>
                             <div class="mt-6 space-y-3">
                                 ${Object.entries(byType).map(([type, amt]) => `
@@ -2449,7 +2453,7 @@
                 { bg: 'rgba(239,68,68,0.15)',   border: '#ef4444' },
                 { bg: 'rgba(99,102,241,0.15)',  border: '#6366f1' },
             ];
-            new Chart(document.getElementById('expenseWeeklyChart'), {
+            createChart('expenseWeeklyChart', {
                 type: 'bar',
                 data: {
                     labels: last7.map(d => d.slice(5)),
@@ -2467,8 +2471,8 @@
                     responsive: true, maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
-                        y: { beginAtZero: true, grid: { display: false }, ticks: { font: { weight: 'bold' } } },
-                        x: { grid: { display: false }, ticks: { font: { weight: 'bold' } } }
+                        y: { beginAtZero: true, grid: { display: false }, ticks: { font: { weight: 'bold' }, color: chartColors() } },
+                        x: { grid: { display: false }, ticks: { font: { weight: 'bold' }, color: chartColors() } }
                     }
                 }
             });
@@ -2476,7 +2480,7 @@
             // By-type doughnut
             const typeEntries = Object.entries(byType);
             if (typeEntries.length > 0) {
-                new Chart(document.getElementById('expenseTypeChart'), {
+                createChart('expenseTypeChart', {
                     type: 'doughnut',
                     data: {
                         labels: typeEntries.map(([t]) => typeConfig[t]?.label || t),
@@ -2507,7 +2511,7 @@
 
             if (!filtered.length) return `<div class="p-10 text-center text-sm text-zinc-400">No expenses found.</div>`;
 
-            return filtered.sort((a,b) => b.date.localeCompare(a.date)).map(e => {
+            return [...filtered].sort((a,b) => b.date.localeCompare(a.date)).map(e => {
                 const cfg = typeConfig[e.expense_type] || { label: e.expense_type, color: '#aaa' };
                 const cfgLabel = escHtml(cfg.label);
                 const cfgColor = escHtml(cfg.color);

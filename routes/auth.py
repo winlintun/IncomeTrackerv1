@@ -107,9 +107,11 @@ def forgot_password():
     )
 
     if user:
+        now = utcnow()
+        PasswordResetToken.query.filter(PasswordResetToken.expires_at < now).delete(synchronize_session=False)
         token = secrets.token_hex(16)
         token_hash = _hash_reset_token(token)
-        expires_at = utcnow() + timedelta(minutes=30)
+        expires_at = now + timedelta(minutes=30)
         PasswordResetToken.query.filter_by(user_id=user.id, used=False).update({'used': True})
         db.session.add(PasswordResetToken(user_id=user.id, token=token_hash, expires_at=expires_at))
         db.session.commit()
@@ -152,6 +154,7 @@ def reset_password():
 
     user.password_hash = bcrypt.generate_password_hash(new_password).decode('utf-8')
     PasswordResetToken.query.filter_by(user_id=user.id, used=False).update({'used': True})
+    PasswordResetToken.query.filter(PasswordResetToken.expires_at < utcnow()).delete(synchronize_session=False)
     db.session.commit()
     return jsonify({'message': 'Password updated. You can now sign in.'})
 
